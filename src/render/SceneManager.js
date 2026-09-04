@@ -74,8 +74,11 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, BALANCE.render.maxPixelRatio));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
-    this.renderer.setClearColor(0x03040a, 1);
+    // ACES de Three applique en interne un facteur 1/0,6 avant la courbe :
+    // une exposition de 1 revient donc déjà à +67 %. À 1,05, calottes et
+    // végétation saturaient et toute l'image virait au pastel délavé.
+    this.renderer.toneMappingExposure = 0.85;
+    this.renderer.setClearColor(0x010205, 1);
     this.renderer.autoClear = true;
 
     /* --- scène et caméra ---------------------------------------------- */
@@ -91,7 +94,10 @@ export class SceneManager {
     this.shared = {
       uSunDirection: { value: new THREE.Vector3(0.82, 0.34, 0.46).normalize() },
       uSunColor: { value: new THREE.Color(1.0, 0.955, 0.90) },
-      uNightAmbient: { value: new THREE.Color(0.052, 0.072, 0.125) },
+      // Ambiante nocturne divisée par deux : la face nuit doit être NOIRE, avec
+      // juste ce qu'il faut de bleu pour que la silhouette reste lisible. Trop
+      // d'ambiante et les lumières de colonies ne ressortent plus.
+      uNightAmbient: { value: new THREE.Color(0.026, 0.038, 0.068) },
       uInsolation: { value: 1 },
       uTime: { value: 0 },
     };

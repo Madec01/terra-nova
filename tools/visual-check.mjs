@@ -149,13 +149,23 @@ async function run() {
 
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'load', timeout: 30000 });
   await page.waitForFunction(() => !!window.TERRA, { timeout: 20000 });
-  await page.evaluate(() => window.TERRA.game.newGame({ seed: 20250904 }));
+  await page.evaluate(() => window.TERRA.game.newGame({ seed: 808 }));
   await page.waitForTimeout(1200);
   await hideUI(true);
 
   /* --- a : planète vierge, tout est inexploré -------------------------- */
-  await aim({ dTheta: -0.55, dPhi: 0.10, dist: 3.5 });
+  await aim({ dTheta: -1.05, dPhi: 0.16, dist: 3.5 });
   await shot('a-vierge');
+
+  /* --- gros plan sur le site d'atterrissage (API focusRegion) ----------- */
+  if (wanted('k-site')) {
+    await page.evaluate(() => {
+      const g = window.TERRA.game;
+      window.TERRA.scene.controls.autoRotate = false;
+      window.TERRA.scene.focusRegion(g.regions.landingSite ?? 0);
+    });
+    await shot('k-site', 1600);
+  }
 
   /* --- capture de contrôle avec l'interface ---------------------------- */
   if (wanted('z-ui')) {
@@ -167,7 +177,7 @@ async function run() {
   /* --- b : tout révélé, monde mort ------------------------------------- */
   await page.evaluate(() => window.TERRA.game.debug.revealAll());
   await page.waitForTimeout(1400);   // l'animation de révélation dure ~0,9 s
-  await aim({ dTheta: -0.55, dPhi: 0.10, dist: 3.5 });
+  await aim({ dTheta: -1.05, dPhi: 0.16, dist: 3.5 });
   await shot('b-decouverte');
 
   /* --- terraformation complète ----------------------------------------- */
@@ -247,8 +257,34 @@ async function run() {
   await page.waitForTimeout(2500);   // le lissage des globales converge
 
   /* --- c : monde vivant, même cadrage que a ---------------------------- */
-  await aim({ dTheta: -0.55, dPhi: 0.10, dist: 3.5 });
+  await aim({ dTheta: -1.05, dPhi: 0.16, dist: 3.5 });
   await shot('c-terraformee');
+
+  /* --- surface seule : isole l'origine d'un artefact -------------------- */
+  // Toutes les couches optionnelles RETIRÉES DE LA SCÈNE (et non simplement
+  // masquées : _syncGlobals rallume leur visibilité à chaque frame). Si un
+  // défaut survit à cette capture, il vient du shader de surface ; sinon c'est
+  // un conflit entre deux couches.
+  if (wanted('y-surface')) {
+    await page.evaluate(() => {
+      const sc = window.TERRA.scene;
+      sc.scene.remove(sc.atmosphere.object3D);
+      sc.scene.remove(sc.clouds.object3D);
+      sc.scene.remove(sc.structures.object3D);
+      sc.scene.remove(sc.overlay.object3D);
+      sc.planet.object3D.remove(sc.planet.ocean);
+    });
+    await shot('y-surface-seule', 900);
+    await page.evaluate(() => {
+      const sc = window.TERRA.scene;
+      sc.scene.add(sc.atmosphere.object3D);
+      sc.scene.add(sc.clouds.object3D);
+      sc.scene.add(sc.structures.object3D);
+      sc.scene.add(sc.overlay.object3D);
+      sc.planet.object3D.add(sc.planet.ocean);
+    });
+    await page.waitForTimeout(400);
+  }
 
   /* --- d : face nuit ---------------------------------------------------- */
   await aim({ dTheta: Math.PI - 0.45, dPhi: 0.05, dist: 3.5 });
@@ -259,7 +295,7 @@ async function run() {
   await shot('e-limbe');
 
   /* --- f/g/h : couches de données --------------------------------------- */
-  await aim({ dTheta: -0.55, dPhi: 0.10, dist: 3.5 });
+  await aim({ dTheta: -1.05, dPhi: 0.16, dist: 3.5 });
   for (const [layer, name] of [
     ['temperature', 'f-couche-temperature'],
     ['biosphere', 'g-couche-biosphere'],
@@ -277,7 +313,7 @@ async function run() {
 
   /* --- j : contre-épreuve, planète vierge au même zoom ------------------ */
   if (wanted('j-zoom-vierge')) {
-    await page.evaluate(() => window.TERRA.game.newGame({ seed: 20250904 }));
+    await page.evaluate(() => window.TERRA.game.newGame({ seed: 808 }));
     await page.waitForTimeout(1400);
     await hideUI(true);
     await aim({ dTheta: -0.35, dPhi: 0.20, dist: 1.6 });

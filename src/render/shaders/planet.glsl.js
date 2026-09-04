@@ -91,10 +91,41 @@ float tnFbm4(vec3 p) {
   return v;
 }
 
-// Décodage du couple 6 bits.
+/**
+ * fbm dont CHAQUE octave s'éteint dès qu'elle passe sous la taille du pixel.
+ * Un fbm ordinaire garde ses octaves hautes quoi qu'il arrive : à 3 octaves,
+ * la dernière est 4 fois plus fine que la première et c'est elle qui crépite.
+ * Ici le poids d'une octave tombe à zéro quand sa longueur d'onde devient
+ * comparable au pixel, et la normalisation par la somme des poids préserve la
+ * moyenne : le motif se fond proprement vers l'uni au lieu de moutonner.
+ *   px = length(fwidth(p)), la taille du pixel mesurée dans l'espace de p.
+ */
+float tnFbmAA(vec3 p, float freq, float px) {
+  float v = 0.0, a = 0.5, norm = 0.0, f = freq;
+  for (int i = 0; i < 4; i++) {
+    float w = a * (1.0 - smoothstep(0.30, 0.95, px * f));
+    if (w > 0.001) { v += w * tnValueNoise(p * f); norm += w; }
+    f *= 2.03;
+    a *= 0.5;
+  }
+  return norm > 1e-4 ? v / norm : 0.5;
+}
+
+/**
+ * Décodage du couple 6 bits.
+ *
+ * ATTENTION : « v » arrive par un varying. Même si les trois sommets du triangle
+ * portent le même entier, l'interpolateur le restitue à un ulp près — donc
+ * 64.0 peut arriver en 63.9999924. floor(63.9999924/64.0) vaut alors 0 au lieu
+ * de 1, et le couple décodé bascule de (glace=1/63, eau=0) à (glace=0, eau=1) :
+ * un pixel sur deux se retrouvait peint en océan profond au milieu d'une
+ * calotte. C'était l'origine du moutonnement de points bleus et orange sur
+ * certaines cellules. On recale donc d'abord sur l'entier exact.
+ */
 vec2 tnUnpack6(float v) {
-  float hi = floor(v / 64.0);
-  float lo = v - hi * 64.0;
+  float t = floor(v + 0.5);
+  float hi = floor(t / 64.0);
+  float lo = t - hi * 64.0;
   return vec2(hi / 63.0, lo / 63.0);
 }
 `;
@@ -128,13 +159,15 @@ varying vec4 vAux;
 void main() {
   float reveal = clamp(aInfo.z, 0.0, 1.0);
 
-  // Les régions non découvertes sont partiellement « aplaties » : le relief
-  // s'installe à la révélation. On garde volontairement une bonne part du
-  // relief même non révélé, sinon la frontière explorée/inexplorée dessine
-  // une falaise nette très laide.
+  // Les régions non découvertes sont à peine « aplaties ». Deux cellules
+  // voisines partagent leurs coins mais chacune écrit les siens : si l'une est
+  // révélée et l'autre non, l'écart de déplacement OUVRE une fissure dans le
+  // maillage, qu'on voit comme une falaise noire. On garde donc 85 % du relief
+  // partout : la fissure devient sous-pixellique et la révélation se joue
+  // presque entièrement sur la couleur.
   vec3 dir = normalize(position);
   vec3 flatPos = dir * uRadius;
-  float shape = 0.42 + 0.58 * reveal;
+  float shape = 0.85 + 0.15 * reveal;
   vec3 pos = mix(flatPos, position, shape);
   vec3 nrm = normalize(mix(dir, normal, shape));
 
@@ -235,9 +268,20 @@ float tnGrid(vec2 uv, float widthPx) {
   return line * fade;
 }
 
+/**
+ * Perturbe un facteur de mélange par le grain, MAIS uniquement dans sa zone de
+ * transition : le terme t·(1−t) s'annule à 0 et à 1. Une cellule sans glace ne
+ * gagne donc jamais de taches de givre, une cellule entièrement verte ne se
+ * troue pas — seule la frontière entre deux cellules devient une frange
+ * organique au lieu d'un bord d'hexagone net.
+ */
+float tnRagged(float t, float grain, float amount) {
+  return clamp(t + (grain - 0.5) * amount * t * (1.0 - t) * 4.0, 0.0, 1.0);
+}
+
 /* --- couleur « naturelle » ---------------------------------------------- */
 
-vec3 naturalColor(float ice, float water, float grain, float macro, float seed, float alt) {
+vec3 naturalColor(float ice, float water, float grain, float ragged, float macro, float seed, float alt) {
   int bi = int(vInfo.x + 0.5);
   vec3 base = uBiomePalette[0];
   // Sélection sans indexation dynamique douteuse : boucle déroulée courte.
@@ -245,41 +289,66 @@ vec3 naturalColor(float ice, float water, float grain, float macro, float seed, 
     if (i == bi) base = uBiomePalette[i];
   }
 
+  // La palette de biomes (src/data/biomes.js) est écrite en valeurs très
+  // claires : la calotte glaciaire y est à 0,88 et la toundra à 0,45.
+  // Multipliées par le soleil puis passées dans ACES, elles ressortent
+  // au-dessus de 0,9 : la planète gelée devenait une boule blanche uniforme,
+  // sans aucun contraste. Compression douce des hautes lumières — les tons
+  // sombres (océan, forêt) sont préservés, les tons clairs sont ramenés dans
+  // une plage exploitable.
+  base = base / (1.0 + base * 1.7);
+
   // Variation de teinte d'une cellule à l'autre : deux cellules voisines du
   // même biome ne doivent JAMAIS avoir exactement la même couleur, sinon la
-  // planète ressemble à une balle de golf peinte d'un seul aplat.
-  base *= vec3(0.90 + 0.20 * fract(seed * 3.13),
-               0.90 + 0.20 * fract(seed * 5.71),
-               0.90 + 0.20 * fract(seed * 7.37));
-  // Nappes continentales très basse fréquence : casse la régularité du pavage.
-  base *= 0.84 + 0.34 * macro;
-  // Le relief éclaircit les crêtes (roche exposée) et assombrit les cuvettes.
-  base *= 1.0 + alt * 0.18;
+  // planète ressemble à une balle de golf peinte d'un seul aplat. Amplitude
+  // volontairement faible : au-delà, sur une surface claire (calotte), le
+  // pavage vire à l'œuf de Pâques.
+  base *= vec3(0.96 + 0.08 * fract(seed * 3.13),
+               0.96 + 0.08 * fract(seed * 5.71),
+               0.96 + 0.08 * fract(seed * 7.37));
 
   // Végétation : verdissement progressif. Seuil bas (0.03) pour que la
   // première mousse se VOIE — c'est la récompense du joueur.
   vec3 vegCol = mix(vec3(0.24, 0.38, 0.15), vec3(0.06, 0.22, 0.09), vData.z);
-  vegCol *= 0.80 + 0.42 * grain;
-  base = mix(base, vegCol, smoothstep(0.03, 0.62, vData.z) * 0.92);
+  vegCol *= 0.78 + 0.46 * ragged;   // texture visible jusqu'en vue rapprochée
+  // Le seuil est BRUITÉ : la limite entre une cellule verte et sa voisine nue
+  // devient une frange organique au lieu d'un bord d'hexagone. C'est ce qui
+  // enlève l'aspect « balle de golf » sans changer une seule donnée du jeu.
+  base = mix(base, vegCol, tnRagged(smoothstep(0.03, 0.62, vData.z), ragged, 0.85) * 0.92);
 
   // Eau liquide : assombrit et sature en bleu. Seuil bas également : dès que
   // l'eau apparaît quelque part, elle doit se lire depuis l'orbite.
   vec3 seaCol = mix(vec3(0.055, 0.185, 0.335), vec3(0.010, 0.055, 0.155), water);
-  base = mix(base, seaCol, smoothstep(0.02, 0.30, water));
+  base = mix(base, seaCol, tnRagged(smoothstep(0.02, 0.30, water), ragged, 0.70));
 
   // Glace : blanchit (par-dessus l'eau : banquise). Légèrement bleutée et pas
   // blanc pur, sinon les calottes brûlent tout le contraste de l'image.
-  vec3 iceCol = vec3(0.70, 0.76, 0.84) * (0.90 + grain * 0.22);
-  base = mix(base, iceCol, smoothstep(0.06, 0.62, ice));
+  // Glace franchement plus sombre et plus froide qu'un blanc de neige : un
+  // monde gelé doit rester lugubre, sinon il brûle tout le contraste de
+  // l'image et le passage au monde vivant ne se voit plus.
+  vec3 iceCol = vec3(0.34, 0.40, 0.51) * (0.86 + grain * 0.28);
+  base = mix(base, iceCol, tnRagged(smoothstep(0.06, 0.62, ice), ragged, 0.85));
 
   // Pollution : désature et vire au brun.
   float lum = dot(base, vec3(0.299, 0.587, 0.114));
   vec3 dirty = mix(vec3(lum), vec3(0.26, 0.19, 0.12), 0.60);
   base = mix(base, dirty, smoothstep(0.05, 0.8, vData.w) * 0.8);
 
-  // Grain de surface appliqué EN DERNIER : il survit ainsi à tous les
-  // mélanges ci-dessus au lieu d'être écrasé par la végétation ou la glace.
-  base *= 0.86 + 0.28 * grain;
+  // Modulation finale, appliquée APRÈS tous les mélanges : elle survit donc à
+  // la végétation comme à la glace, au lieu d'être écrasée par elles.
+  //   · macro  : nappes continentales très basse fréquence ;
+  //   · alt    : crêtes éclaircies, cuvettes assombries ;
+  //   · grain  : texture de surface ;
+  //   · seed   : chaque cellule a sa propre valeur moyenne.
+  // Somme et non produit : quatre facteurs multiplicatifs de moyenne 1 ont un
+  // maximum à 1,6 — la surface saturait alors dans le tone mapping et tout
+  // virait au blanc pastel. Une somme d'écarts reste centrée sur 1.
+  float modul = 1.0
+    + (macro - 0.5) * 0.34
+    + alt * 0.14
+    + (mix(grain, ragged, 0.45) - 0.5) * 0.38
+    + (fract(seed * 11.71) - 0.5) * 0.14;
+  base *= clamp(modul, 0.55, 1.32);
 
   return base;
 }
@@ -287,7 +356,7 @@ vec3 naturalColor(float ice, float water, float grain, float macro, float seed, 
 /* --- couleur d'une couche de visualisation ------------------------------- */
 
 vec3 layerColor(int layer, float ice, float water, float minerals, float geo,
-                float grain, float macro, float seed, float alt) {
+                float grain, float ragged, float macro, float seed, float alt) {
   if (layer == 1) {
     // Température
     return ramp5(vData.x,
@@ -321,7 +390,7 @@ vec3 layerColor(int layer, float ice, float water, float minerals, float geo,
     // Habitabilité
     return ramp3(vAux.y, vec3(0.28, 0.10, 0.16), vec3(0.55, 0.48, 0.16), vec3(0.28, 0.82, 0.52));
   }
-  return naturalColor(ice, water, grain, macro, seed, alt);
+  return naturalColor(ice, water, grain, ragged, macro, seed, alt);
 }
 
 void main() {
@@ -342,31 +411,50 @@ void main() {
   // l'étalon de tous les motifs procéduraux ci-dessous.
   float px = length(fwidth(vObject));
 
-  // Chaque cellule tire sa propre graine de son centre : deux cellules
-  // voisines de même biome n'ont ainsi jamais exactement le même grain.
-  float cellSeed = fract(sin(dot(vCenterW, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+  // Chaque cellule tire sa propre graine de son IDENTIFIANT, arrondi à l'entier.
+  //
+  // ATTENTION, piège coûteux : cette graine était auparavant hachée depuis
+  // vCenterW, un varying. Même quand les trois sommets d'un triangle portent
+  // la même valeur, l'interpolateur la restitue à un ulp près — et le facteur
+  // 43758 du hash amplifie ce bruit de 1e-7 en un décalage de l'ordre de 0,3.
+  // La graine devenait donc ALÉATOIRE PAR PIXEL sur certaines cellules, d'où
+  // le moutonnement de points saturés qui dominait toute l'image. floor() sur
+  // un identifiant entier rend la graine rigoureusement constante par cellule.
+  float cellId = floor(vCell + 0.5);
+  float cellSeed = fract(sin(cellId * 12.9898 + 78.233) * 43758.5453);
 
   // Altitude normalisée -1..1, relue depuis la géométrie : sert au ton de la
   // roche et à une occlusion « de fond de vallée ».
   float alt = clamp((length(vObject) / uRadius - 1.0) / max(uRelief, 1e-4), -1.0, 1.0);
 
-  /* --- grain de surface, borné par la taille du pixel ------------------- */
-  const float GRAIN_FREQ = 30.0;
-  float grainFade = 1.0 - smoothstep(0.28, 0.95, px * GRAIN_FREQ);
-  float grain = 0.5;
-  if (grainFade > 0.002) {
-    grain = mix(0.5, tnFbm3(vObject * GRAIN_FREQ + cellSeed * 9.0), grainFade);
-  }
+  /* --- grain de surface, chaque octave bornée par la taille du pixel ---- */
+  // Quatre octaves à partir d'une fréquence BASSE : la première dessine des
+  // reliefs de la taille d'une région (c'est elle qui donne du modelé au
+  // terrain), les dernières le grain de roche. Une seule fonction couvre donc
+  // toute la gamme, et chaque octave s'éteint proprement à sa distance.
+  const float GRAIN_FREQ = 7.0;
+  float grainFade = 1.0 - smoothstep(0.30, 0.95, px * GRAIN_FREQ * 4.0);
+  float grain = tnFbmAA(vObject + vec3(cellSeed * 9.0), GRAIN_FREQ, px);
   // Nappe très basse fréquence : jamais aliasée, toujours active.
   float macro = tnValueNoise(vObject * 4.3 + vec3(2.7, 8.1, 5.3));
+
+  // Bruit HAUTE fréquence dédié aux frontières de biome. Le fbm ci-dessus est
+  // dominé par sa première octave (poids 0,5) : utilisé pour dentelér les
+  // limites, il les déplaçait en bloc au lieu de les découper. Il faut une
+  // fréquence franchement plus fine, éteinte dès qu'elle passe sous le pixel.
+  float edgeFade = 1.0 - smoothstep(0.30, 0.95, px * 40.0);
+  float ragged = grain;
+  if (edgeFade > 0.002) {
+    ragged = mix(grain, mix(0.5, tnValueNoise(vObject * 40.0 + 21.7), edgeFade), 0.65);
+  }
 
   // Distance normalisée au centre de la cellule, mesurée géométriquement
   // depuis aCenter : sert au liseré de bord conjointement à vEdge.
   float radial = clamp(length(vWorld - vCenterW) / max(length(vWorld) * 0.09, 1e-4), 0.0, 1.0);
 
   // Couleur : fondu animé entre deux couches.
-  vec3 colA = layerColor(uLayerFrom, ice, water, minerals, geo, grain, macro, cellSeed, alt);
-  vec3 colB = layerColor(uLayerTo, ice, water, minerals, geo, grain, macro, cellSeed, alt);
+  vec3 colA = layerColor(uLayerFrom, ice, water, minerals, geo, grain, ragged, macro, cellSeed, alt);
+  vec3 colB = layerColor(uLayerTo, ice, water, minerals, geo, grain, ragged, macro, cellSeed, alt);
   vec3 albedo = mix(colA, colB, clamp(uLayerBlend, 0.0, 1.0));
 
   // En mode couche de données, les liserés de cellule deviennent lisibles.
@@ -391,9 +479,9 @@ void main() {
   vec2 guv = vec2(glon, glat) * 13.0;
   float minor = tnGrid(guv, 0.9);
   float major = tnGrid(guv * 0.25, 1.3);
-  vec3 unknown = vec3(0.019, 0.025, 0.035);
-  unknown += vec3(0.030, 0.046, 0.062) * minor;
-  unknown += vec3(0.055, 0.085, 0.115) * major;
+  vec3 unknown = vec3(0.017, 0.023, 0.032);
+  unknown += vec3(0.016, 0.026, 0.036) * minor;
+  unknown += vec3(0.032, 0.050, 0.068) * major;
   // Balayage de cartographie : très basse fréquence, donc jamais aliasé.
   unknown += vec3(0.006, 0.011, 0.016) * (0.5 + 0.5 * sin(glat * 3.0 - uTime * 0.55));
   // Léger flash à l'instant de la révélation.
@@ -415,7 +503,7 @@ void main() {
     vec3 gt = grad - N * dot(N, grad);
     float gl = length(gt);
     if (gl > 1e-5) {
-      float amp = min(gl * 0.010, 0.55) * grainFade * (1.0 - water * 0.8) * reveal;
+      float amp = min(gl * 0.014, 0.55) * grainFade * (1.0 - water * 0.8) * reveal;
       N = normalize(N - (gt / gl) * amp);
     }
   }
@@ -449,21 +537,27 @@ void main() {
   color += uSunColor * spec * 0.60;
 
   /* --- lumières de colonies côté nuit ---------------------------------- */
-  float night = 1.0 - dayMask;
+  // Seuil resserré et décalé après le terminateur : sinon les lumières
+  // bavaient sur le crépuscule en confettis khaki au milieu de la végétation.
+  float night = 1.0 - smoothstep(-0.22, 0.01, dot(Nr, L));
   float density = clamp(vAux.x, 0.0, 1.0);
   if (night > 0.001 && density > 0.001) {
     // Amas de lumières, atténués dès qu'ils deviennent plus fins que le pixel
     // (sinon : confettis clignotants). Un halo diffus prend le relais.
-    const float LIGHT_FREQ = 110.0;
-    float lightFade = 1.0 - smoothstep(0.30, 0.95, px * LIGHT_FREQ);
+    const float LIGHT_FREQ = 70.0;
+    float lightFade = 1.0 - smoothstep(0.25, 0.85, px * LIGHT_FREQ);
     float dots = 0.0;
     if (lightFade > 0.002) {
       float lp = tnValueNoise(vObject * LIGHT_FREQ + 13.0);
-      dots = smoothstep(0.55, 0.80, lp + density * 0.35) * lightFade;
+      // Seuil haut : peu de points, mais francs. Un semis dense et tiède se lit
+      // comme une tache de sable, pas comme une ville.
+      dots = smoothstep(0.70, 0.86, lp + density * 0.16) * lightFade;
     }
-    float glow = smoothstep(0.10, 0.80, density);
-    float flicker = 0.90 + 0.10 * sin(uTime * 1.7 + vCell * 1.7);
-    color += vec3(1.00, 0.70, 0.40) * (dots * 0.95 + glow * 0.16) * density * night * flicker;
+    // Halo diffus : c'est lui qui porte la lecture « ville » quand le grain
+    // devient trop fin ; les points ne font qu'ajouter le scintillement.
+    float glow = smoothstep(0.05, 0.75, density);
+    float flicker = 0.92 + 0.08 * sin(uTime * 1.7 + cellId * 1.7);
+    color += vec3(1.00, 0.64, 0.30) * (dots * 5.0 + glow * 0.22) * density * night * flicker;
   }
 
   /* --- flash de révélation + surbrillance ------------------------------ */

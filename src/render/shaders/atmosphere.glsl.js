@@ -35,10 +35,12 @@ void main() {
 export const atmosphereFragmentShader = /* glsl */ `
 uniform vec3  uSunDirection;
 uniform vec3  uSunColor;
-uniform float uPressure;     // kPa
-uniform float uOxygen;       // % du volume
+uniform float uPressure;      // kPa
+uniform float uOxygen;        // % du volume
 uniform float uInsolation;
 uniform float uTime;
+uniform float uPlanetRadius;  // rayon de la surface, monde
+uniform float uShellRadius;   // rayon de la coquille d'atmosphère, monde
 
 varying vec3 vWorld;
 varying vec3 vNormalW;
@@ -57,9 +59,34 @@ void main() {
   // Richesse en oxygène : 0 = atmosphère morte (grise), 1 = ciel terrestre.
   float o2 = clamp(uOxygen / 20.0, 0.0, 1.15);
 
-  // Fresnel : l'épaisseur optique explose au limbe.
+  // Fresnel : utile pour la teinte, pas pour l'intensité.
   float rim = 1.0 - clamp(dot(N, V), 0.0, 1.0);
-  float limb = pow(rim, 3.0);
+
+  // ÉPAISSEUR TRAVERSÉE, calculée analytiquement. Un simple pow(fresnel) place
+  // le maximum d'intensité sur le bord EXTÉRIEUR de la coquille : on obtient
+  // un anneau à bord franc, qui ne ressemble à rien. Ici on mesure la vraie
+  // longueur du segment de rayon compris entre la coquille et la surface :
+  // elle vaut 0 au bord extérieur, elle est maximale juste au ras du limbe de
+  // la planète, et elle décroît doucement sur le disque. La planète est
+  // centrée à l'origine du monde, d'où le calcul direct.
+  vec3 D = normalize(vWorld - cameraPosition);
+  float tca = dot(-cameraPosition, D);
+  float b2 = max(dot(cameraPosition, cameraPosition) - tca * tca, 0.0);
+  float Ra2 = uShellRadius * uShellRadius;
+  float Rp2 = uPlanetRadius * uPlanetRadius;
+  float da = sqrt(max(Ra2 - b2, 0.0));
+  float dp = sqrt(max(Rp2 - b2, 0.0));
+  // Devant la planète on ne voit que la moitié avant de la coquille ; à côté
+  // d'elle, le rayon traverse l'atmosphère de part en part.
+  float path = (b2 < Rp2) ? (da - dp) : (2.0 * da);
+  // Normalisation par le trajet MAXIMAL possible, celui qui rase exactement le
+  // limbe de la planète. Normaliser par l'épaisseur de la coquille saturait le
+  // rapport sur toute une large bande et redonnait un anneau uniforme.
+  float maxPath = 2.0 * sqrt(max(Ra2 - Rp2, 1e-6));
+  float limb = clamp(path / maxPath, 0.0, 1.0);
+  // Décroissance cubique : le halo doit s'éteindre vite en s'éloignant du
+  // limbe, sinon la coquille se lit comme une bulle de verre autour du globe.
+  limb = limb * limb * limb;
 
   float ndl = dot(N, L);
   // Face éclairée, avec un léger débordement au-delà du terminateur.
@@ -80,14 +107,14 @@ void main() {
   // au profit du rouge quand l'épaisseur traversée augmente.
   vec3 scatter = tint * (0.50 + 0.50 * pow(rim, 1.5));
 
-  float intensity = limb * lit * density * (0.45 + 0.35 * uInsolation);
-  // Halo interne très léger, pour « poser » la planète sur le fond noir.
-  intensity += pow(rim, 1.6) * lit * density * 0.07;
+  float intensity = limb * lit * density * (0.60 + 0.28 * uInsolation);
+  // Voile interne très léger, pour « poser » la planète sur le fond noir.
+  intensity += smoothstep(0.0, 0.45, limb) * lit * density * 0.05;
 
   // Un souffle très lent évite l'aspect figé.
   intensity *= 0.95 + 0.05 * sin(uTime * 0.25);
 
-  vec3 color = scatter * uSunColor * intensity * 1.15;
+  vec3 color = scatter * uSunColor * intensity * 1.10;
 
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>

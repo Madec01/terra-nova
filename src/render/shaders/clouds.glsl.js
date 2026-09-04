@@ -62,10 +62,14 @@ void main() {
   float bands = 0.5 + 0.5 * sin(p.y * 7.5 + warp * 2.2);
   n = mix(n, n * (0.55 + 0.65 * bands), 0.45);
 
-  // Seuil piloté par la couverture. cover=0 → seuil 1.05 (inatteignable).
+  // Seuil piloté par la couverture. Il est calé sur la distribution RÉELLE de
+  // tnFbm4 (moyenne ≈ 0,47, l'essentiel des valeurs entre 0,30 et 0,65) : un
+  // seuil à 0,64 pour une couverture de 50 % ne laissait passer que quelques
+  // filaments et le ciel restait vide alors que la simulation annonçait des
+  // nuages. cover=0 → seuil 0,82, pratiquement inatteignable.
   float cover = clamp(uCoverage, 0.0, 1.0);
-  float threshold = mix(1.05, 0.20, cover);
-  float density = smoothstep(threshold, threshold + 0.26, n);
+  float threshold = mix(0.82, 0.26, cover);
+  float density = smoothstep(threshold, threshold + 0.15, n);
   if (density <= 0.002) discard;
 
   vec3 N = normalize(vNormalW);
@@ -83,9 +87,11 @@ void main() {
   vec3 color = white * shade * uSunColor * wrap * uInsolation;
   color += white * uNightAmbient * 0.8;
 
-  // Liseré lumineux au limbe éclairé (diffusion avant).
-  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
-  color += uSunColor * rim * smoothstep(0.0, 0.4, ndl) * 0.25;
+  // Liseré lumineux au limbe éclairé (diffusion avant), volontairement discret :
+  // sur une coquille vue par la tranche il devient sinon un anneau continu qui
+  // enferme la planète dans un sac plastique.
+  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
+  color += uSunColor * rim * smoothstep(0.0, 0.4, ndl) * 0.12;
 
   // Le bord des nuages est plus fin donc plus transparent.
   float alpha = density * (0.30 + 0.62 * cover);

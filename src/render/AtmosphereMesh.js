@@ -30,9 +30,16 @@ export class AtmosphereMesh {
       uTime: shared.uTime,
       uPressure: { value: BALANCE.start.globals.pressure },
       uOxygen: { value: BALANCE.start.globals.oxygen },
+      // Les deux rayons servent au calcul analytique de l'épaisseur traversée
+      // (voir atmosphereFragmentShader) : sans eux le halo dégénère en anneau
+      // à bord franc.
+      uPlanetRadius: { value: this.radius },
+      uShellRadius: { value: this.radius * 1.02 },
     };
 
-    this.geometry = new THREE.IcosahedronGeometry(1, 4);
+    // Subdivision 5 : à 4, le bord EXTÉRIEUR de la coquille dessinait un
+    // polygone visible autour du halo.
+    this.geometry = new THREE.IcosahedronGeometry(1, 5);
     this.material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
       vertexShader: atmosphereVertexShader,
@@ -63,8 +70,10 @@ export class AtmosphereMesh {
 
     // Épaisseur visible : de +1,5 % (atmosphère résiduelle) à +8 % du rayon
     // (atmosphère dense). La coquille reste au-dessus du relief maximal.
-    const thick = 0.015 + 0.065 * clamp01(1 - Math.exp(-p / 38));
-    this.mesh.scale.setScalar(this.radius * (1 + thick));
+    const thick = 0.012 + 0.055 * clamp01(1 - Math.exp(-p / 38));
+    const shell = this.radius * (1 + thick);
+    this.mesh.scale.setScalar(shell);
+    this.uniforms.uShellRadius.value = shell;
 
     // Sous ~4 kPa il n'y a rien à dessiner : le shader renverrait de toute
     // façon une intensité nulle, autant économiser la passe entière. C'est ce
