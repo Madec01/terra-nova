@@ -19,7 +19,9 @@ Autres commandes :
 npm run build        # build de production dans dist/
 npm run preview      # sert le build
 npm test             # tests unitaires (node --test)
+npm run boot         # contrôle de démarrage rapide (40 s) — le jeu se lance-t-il ?
 npm run smoke        # scénario de jeu complet en navigateur headless
+npm run mobile       # audit de jouabilité tactile sur trois profils d'écran
 npm run smoke:shot   # idem + captures d'écran dans /tmp/terranova-shots
 ```
 
@@ -66,15 +68,38 @@ habitable.
 | Action | Souris / clavier | Tactile |
 |---|---|---|
 | Tourner la planète | glisser | glisser à un doigt |
-| Zoomer | molette | pincer |
-| Sélectionner une région | clic | tap |
+| Zoomer | molette | pincer à deux doigts |
+| Sélectionner une région | clic | appui |
 | Pause / reprise | `Espace` | bouton ⏸ |
 | Vitesses ×1 ×2 ×4 | `1` `2` `3` | boutons |
-| Construire | `B` | icône ⛏ |
-| Couches | `L` / `Tab` | icône ◈ |
-| Recherche | `R` | icône ⌬ |
-| Annuler / fermer | `Échap` | — |
+| Construire | `B` | onglet ⛏ |
+| Couches | `L` / `Tab` | onglet ◈ |
+| Recherche | `R` | onglet ⌬ |
+| Annuler / fermer | `Échap` | poignée de la feuille |
 | Panneau développeur | `F2` | — |
+
+### Téléphone et tablette
+
+Le jeu est jouable au doigt seul. La planète reste l'élément principal : les
+panneaux s'ouvrent en feuilles glissant depuis le bas, une seule à la fois.
+
+Deux points méritent d'être connus, parce qu'ils ne vont pas de soi :
+
+- **Il n'y a pas de survol au doigt.** Toute information qui n'existait qu'en
+  infobulle — au premier rang la décomposition des contributions, « pourquoi la
+  température monte » — dispose d'un équivalent accessible à l'appui. C'est un
+  pilier du concept : le joueur doit pouvoir comprendre les conséquences de ses
+  décisions, sur téléphone comme ailleurs.
+- **Le cadrage de la caméra s'adapte à la forme de l'écran.** Le champ de vision
+  vertical étant fixe, un écran en portrait a une ouverture horizontale bien plus
+  étroite : sans compensation, la planète déborde des deux côtés. La distance de
+  cadrage est calculée sur le plus petit des deux demi-angles et recalculée à
+  chaque rotation de l'appareil.
+
+Vérification : `node tools/mobile-check.mjs` audite trois profils (iPhone
+390×844, Android 360×800, paysage 844×390) en contexte tactile réel — pas
+seulement une fenêtre étroite — et signale débordements, cibles sous 44 px et
+informations inaccessibles.
 
 ## Architecture
 
