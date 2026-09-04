@@ -50,11 +50,9 @@ test('usines à gaz à effet de serre : CO₂ ↑, température ↑, stabilité 
     // De l'énergie en abondance pour que les usines tournent à plein régime.
     h.addBuilding('fusion', 1, 1);
     h.addBuilding('fusion', 4, 1);
+    h.addBuilding('fusion', 7, 1);
     if (withFactories) {
-      h.addBuilding('ghg_factory', 2, 1);
-      h.addBuilding('ghg_factory', 5, 1);
-      h.addBuilding('ghg_factory', 8, 1);
-      h.addBuilding('ghg_factory', 11, 1);
+      for (let i = 0; i < 8; i++) h.addBuilding('ghg_factory', i * 3 + 2, 1);
     }
     h.state.resources.energy = 400;
     h.state.resources.water = 600;
@@ -346,6 +344,221 @@ test('victoire déclenchée après sustainDays et une seule fois', () => {
 
   const rows = victory.report(h.state);
   assert.equal(rows.length, 7);
+});
+
+/* ===================================================================== */
+/*  11. MODÈLE ATMOSPHÉRIQUE EN PRESSIONS PARTIELLES                     */
+/* ===================================================================== */
+
+/** Raccourci : la loi fondamentale du modèle, vérifiable à tout instant. */
+function assertAtmosphereCoherent(g, where = '') {
+  assert.ok(Number.isFinite(g.pCO2) && Number.isFinite(g.pO2) && Number.isFinite(g.pInert),
+    `pressions partielles non finies ${where}`);
+  assert.ok(g.pCO2 >= 0 && g.pO2 >= 0 && g.pInert >= 0,
+    `pression partielle négative ${where} : ${g.pCO2}/${g.pO2}/${g.pInert}`);
+  assert.ok(Math.abs(g.pressure - (g.pCO2 + g.pO2 + g.pInert)) < 1e-6,
+    `pressure ≠ pCO2+pO2+pInert ${where} : ${g.pressure} vs ${g.pCO2 + g.pO2 + g.pInert}`);
+  assert.ok(g.co2 + g.oxygen <= 100.01,
+    `co2 + oxygen = ${g.co2 + g.oxygen} > 100 ${where}`);
+  assert.ok(g.co2 >= 0 && g.oxygen >= 0, `pourcentage négatif ${where}`);
+}
+
+test('l’état initial dérive les pressions partielles de BALANCE.start.globals', () => {
+  const h = createSimHarness({ seed: 30 });
+  const g = h.state.globals;
+  const S = BALANCE.start.globals;
+  assert.ok(Math.abs(g.pCO2 - S.pressure * S.co2 / 100) < 1e-6, 'pCO2 initial');
+  assert.ok(Math.abs(g.pO2 - S.pressure * S.oxygen / 100) < 1e-6, 'pO2 initial');
+  assertAtmosphereCoherent(g, 'au démarrage');
+  // Rétrocompatibilité : un état sans pressions partielles (ancienne
+  // sauvegarde) doit être reconstruit sans casser la composition affichée.
+  delete g.pCO2; delete g.pO2; delete g.pInert;
+  g.pressure = 50; g.co2 = 40; g.oxygen = 10;
+  const climate = h.systems.find((x) => x.constructor.name === 'ClimateSystem');
+  climate.reset(h.ctx);
+  assert.ok(Math.abs(g.pCO2 - 20) < 1e-6, `pCO2 reconstruit : ${g.pCO2}`);
+  assert.ok(Math.abs(g.pO2 - 5) < 1e-6, `pO2 reconstruit : ${g.pO2}`);
+  assert.ok(Math.abs(g.pInert - 25) < 1e-6, `pInert reconstruit : ${g.pInert}`);
+  assertAtmosphereCoherent(g, 'après migration');
+});
+
+test('20 000 jours de conversions : co2 + oxygen ≤ 100 à TOUT instant', () => {
+  const h = createSimHarness({ seed: 31 });
+  h.state.tech.unlocked.push('metallurgy', 'geothermal_tap', 'greenhouse_gases',
+    'polar_engineering', 'atmospheric_engineering', 'carbon_capture', 'climate_control',
+    'exobiology', 'pioneer_organisms', 'forestation', 'ecosystems', 'orbital_survey',
+    'orbital_infrastructure', 'colonization', 'terraform_mastery');
+  h.refreshTech();
+  // Une flotte volontairement DÉMESURÉE : c'est le pire cas pour le modèle.
+  for (let i = 0; i < 12; i++) h.addBuilding('fusion', i);
+  for (let i = 0; i < 20; i++) h.addBuilding('ghg_factory', i * 2 + 1);
+  for (let i = 0; i < 20; i++) h.addBuilding('atmo_processor', i * 2 + 2);
+  for (let i = 0; i < 20; i++) h.addBuilding('o2_generator', i * 3 + 5);
+  for (let i = 0; i < 8; i++) h.addBuilding('orbital_mirror', i);
+  for (let i = 0; i < 10; i++) h.addBuilding('biodome', i * 5 + 3);
+  h.state.resources.energy = 100000;
+  h.state.resources.water = 100000;
+
+  let worst = 0, day = 0;
+  h.run(20000, (state) => {
+    day += 1;
+    const g = state.globals;
+    assertAtmosphereCoherent(g, `au jour ${day}`);
+    worst = Math.max(worst, g.co2 + g.oxygen);
+  });
+  assert.ok(worst <= 100.01, `pire somme observée : ${worst}`);
+  // Et la pression ne doit jamais avoir tapé le plafond de sécurité.
+  assert.ok(h.state.globals.pressure < BALANCE.atmosphere.maxPressure - 0.01,
+    `la pression sature (${h.state.globals.pressure} kPa)`);
+});
+
+test('craquer du CO₂ en O₂ ne crée pas de matière et s’arrête à sec', () => {
+  // On isole le ClimateSystem : un accumulateur fabriqué à la main permet de
+  // ne tester QUE la conversion, sans les autres sources de gaz.
+  const h = createSimHarness({ seed: 32, w: 4, h: 1 });
+  const climate = h.systems.find((x) => x.constructor.name === 'ClimateSystem');
+  const g = h.state.globals;
+
+  const only = (oxygenRate) => ({
+    produce: { energy: 0, materials: 0, science: 0, biomass: 0, water: 0 },
+    consume: { energy: 0, materials: 0, science: 0, biomass: 0, water: 0 },
+    global: { co2: 0, pressure: 0, oxygen: oxygenRate, temperature: 0, stability: 0, insolation: 0 },
+    capacity: { energy: 0, materials: 0, water: 0 },
+    staticGlobal: { insolation: 0 },
+    dampening: 0, localHeat: null,
+    contributions: { energy: [] },
+  });
+
+  // Atmosphère de départ maîtrisée, sans biomasse (pas de photosynthèse) et
+  // sans glace (pas de sublimation) : la conversion est le seul mécanisme.
+  for (let i = 0; i < h.regions.count; i++) { h.regions.ice[i] = 0; h.regions.vegetation[i] = 0; }
+  g.biomass = 0;
+  g.pCO2 = 20; g.pO2 = 1; g.pInert = 30;
+
+  const ctx = { ...h.ctx, dt: 1, acc: only(0.5) };
+  const before = g.pCO2 + g.pO2;
+  climate.tick(ctx);
+  const after = g.pCO2 + g.pO2;
+  // Conservation stricte : la fuite atmosphérique est le seul autre terme, et
+  // elle est proportionnelle (donc minuscule sur un jour).
+  assert.ok(Math.abs(after - before) < before * BALANCE.atmosphere.leak * 2,
+    `la conversion doit conserver la matière (${before} → ${after})`);
+  assert.ok(g.pO2 > 1.4, `l’O₂ doit avoir gagné ~0,5 kPa (${g.pO2})`);
+  assert.ok(g.pCO2 < 19.6, `le CO₂ doit avoir perdu autant (${g.pCO2})`);
+  assertAtmosphereCoherent(g, 'après conversion');
+
+  // À sec : on demande à craquer bien plus de CO₂ qu'il n'en reste.
+  g.pCO2 = 0.4; g.pO2 = 5; g.pInert = 30;
+  const sum0 = g.pCO2 + g.pO2;
+  climate.tick({ ...h.ctx, dt: 1, acc: only(50) });
+  assert.ok(g.pCO2 >= 0, `pCO2 négatif : ${g.pCO2}`);
+  assert.ok(g.pCO2 < 0.001, `le CO₂ doit être épuisé, pas dépassé : ${g.pCO2}`);
+  assert.ok(g.pO2 <= sum0 + 1e-6, `l’O₂ ne doit pas dépasser le stock total (${g.pO2} > ${sum0})`);
+  assertAtmosphereCoherent(g, 'à sec');
+});
+
+/* ===================================================================== */
+/*  12. MIROIRS ORBITAUX : UN NIVEAU, PAS UN CUMUL                       */
+/* ===================================================================== */
+
+test('les miroirs orbitaux sont réversibles : les démonter ramène insolation à 1', () => {
+  const h = createSimHarness({ seed: 33 });
+  h.state.resources.energy = 10000;
+  assert.equal(h.state.globals.insolation, 1, 'aucun miroir → ensoleillement nominal');
+
+  for (let i = 0; i < 6; i++) h.addBuilding('orbital_mirror', i);
+  h.run(30);
+  const withMirrors = h.state.globals.insolation;
+  assert.ok(withMirrors > 1.2, `6 miroirs doivent éclairer davantage (${withMirrors})`);
+
+  // Le niveau ne DÉRIVE PAS avec le temps : c'est un niveau, pas un taux.
+  h.run(3650);
+  assert.ok(Math.abs(h.state.globals.insolation - withMirrors) < 1e-6,
+    `l’ensoleillement ne doit pas s’accumuler (${withMirrors} → ${h.state.globals.insolation})`);
+  assert.ok(h.state.globals.insolation <= BALANCE.climate.maxInsolation);
+
+  // Le joueur démonte tout : on doit revenir exactement à 1 dès le tick suivant.
+  h.state.buildings = h.state.buildings.filter((b) => b.type !== 'orbital_mirror');
+  h.run(1);
+  assert.equal(h.state.globals.insolation, 1,
+    `démonter tous les miroirs doit ramener l’ensoleillement à 1 (${h.state.globals.insolation})`);
+
+  // Et la planète doit REFROIDIR : la surchauffe n'est pas irréversible.
+  const eqHot = (() => {
+    for (let i = 0; i < 6; i++) h.addBuilding('orbital_mirror', i);
+    h.run(5);
+    return h.state.globals.equilibrium;
+  })();
+  h.state.buildings = h.state.buildings.filter((b) => b.type !== 'orbital_mirror');
+  h.run(5);
+  assert.ok(h.state.globals.equilibrium < eqHot - 5,
+    `l’équilibre radiatif doit redescendre (${eqHot} → ${h.state.globals.equilibrium})`);
+
+  // Une ligne de contribution explique le phénomène au joueur.
+  for (let i = 0; i < 3; i++) h.addBuilding('orbital_mirror', i);
+  h.run(2);
+  const rows = h.state.contributions.temperature;
+  const mirror = rows.find((r) => r.label === 'Miroirs orbitaux');
+  assert.ok(mirror, 'la ligne « Miroirs orbitaux » doit exister');
+  assert.ok(mirror.value > 0, `elle doit être positive (${mirror && mirror.value})`);
+});
+
+test('un bâtiment inactif ne contribue pas à staticGlobal', () => {
+  const h = createSimHarness({ seed: 34 });
+  h.state.resources.energy = 10000;
+  for (let i = 0; i < 4; i++) h.addBuilding('orbital_mirror', i);
+  h.run(2);
+  const full = h.ctx.acc.staticGlobal.insolation;
+  assert.ok(full > 0, 'quatre miroirs actifs contribuent');
+
+  // Panne (downtime > 0) sur la moitié de la flotte.
+  h.state.buildings.forEach((b, i) => { if (b.type === 'orbital_mirror' && i % 2 === 0) b.downtime = 100; });
+  h.run(1);
+  const half = h.ctx.acc.staticGlobal.insolation;
+  assert.ok(Math.abs(half - full / 2) < 1e-9,
+    `deux miroirs en panne = moitié moins d’ensoleillement (${full} → ${half})`);
+  assert.ok(h.state.globals.insolation < 1 + full,
+    'l’ensoleillement doit suivre la baisse');
+
+  // Toute la flotte en panne : plus aucune contribution.
+  h.state.buildings.forEach((b) => { if (b.type === 'orbital_mirror') b.downtime = 100; });
+  h.run(1);
+  assert.equal(h.ctx.acc.staticGlobal.insolation, 0, 'aucun miroir actif → aucun niveau');
+  assert.equal(h.state.globals.insolation, 1);
+});
+
+/* ===================================================================== */
+/*  13. Les colonies survivent quand la région les nourrit               */
+/* ===================================================================== */
+
+test('une colonie installée sur une région verte et humide croît au lieu de s’éteindre', () => {
+  const h = createSimHarness({
+    seed: 35, w: 8, h: 1,
+    init: (R, state) => {
+      for (let i = 0; i < R.count; i++) {
+        R.elevation[i] = BALANCE.planet.seaLevel - 0.43;
+        R.ice[i] = 0; R.water[i] = 0.3; R.moisture[i] = 0.8;
+        R.vegetation[i] = 0.9; R.fertilityBase[i] = 1; R.temperature[i] = 15;
+      }
+      state.globals.temperature = 15;
+      state.globals.pressure = 80;
+      state.globals.co2 = 20;
+      state.globals.oxygen = 20;
+      state.globals.biomass = 60;
+    },
+  });
+  h.addBuilding('colony', 2);
+  // Stocks planétaires VIDES : la colonie ne doit compter que sur sa région.
+  h.state.resources.water = 0;
+  h.state.resources.biomass = 0;
+  h.run(2000);
+
+  const pop = h.state.globals.population;
+  assert.ok(pop > BALANCE.colony.seedPopulation * 2,
+    `la colonie doit croître même sans stocks planétaires (${pop} habitants)`);
+  assert.ok(Number.isFinite(pop));
+  // Et l'agriculture locale doit alimenter la réserve de vivres.
+  assert.ok(h.state.resources.biomass > 0, 'la colonie doit produire ses vivres');
 });
 
 /* ===================================================================== */
