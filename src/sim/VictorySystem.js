@@ -1,10 +1,10 @@
 /**
- * VictorySystem — les sept conditions de fin de partie.
+ * VictorySystem — les huit conditions de fin de partie.
  *
  * `report(state)` est appelé par l'interface : il ne doit RIEN modifier et ne
  * doit rien allouer (les lignes sont créées une fois puis mutées).
  *
- * La victoire demande de tenir les sept conditions simultanément pendant
+ * La victoire demande de tenir les huit conditions simultanément pendant
  * `sustainDays` jours : c'est la phase la plus tendue de la partie, d'où
  * l'avertissement quand on perd une condition à mi-parcours.
  */
@@ -26,6 +26,7 @@ export class VictorySystem {
       { key: 'biomass', label: 'Biomasse', value: 0, target: 0, ok: false, format: '', progress: 0 },
       { key: 'population', label: 'Population', value: 0, target: 0, ok: false, format: 'hab.', progress: 0 },
       { key: 'stability', label: 'Stabilité climatique', value: 0, target: 0, ok: false, format: '%', progress: 0 },
+      { key: 'drift', label: 'Dérive thermique', value: 0, target: 0, ok: false, format: '°C/an', progress: 0 },
     ];
   }
 
@@ -33,7 +34,7 @@ export class VictorySystem {
 
   /* =================================================================== */
 
-  /** Rapport lisible des sept conditions. Fonction PURE (lecture seule). */
+  /** Rapport lisible des huit conditions. Fonction PURE (lecture seule). */
   report(state) {
     const V = BALANCE.victory;
     const g = state.globals;
@@ -56,6 +57,15 @@ export class VictorySystem {
     this._simple(r[4], g.biomass, V.biomass.min);
     this._simple(r[5], g.population, V.population.min);
     this._simple(r[6], g.stability, V.stability.min);
+
+    // 8. Dérive thermique : condition « au plus », contrairement aux autres.
+    const drift = Math.abs(Number.isFinite(g.dTemperature) ? g.dTemperature : 0);
+    r[7].value = drift;
+    r[7].target = V.maxDrift.max;
+    r[7].ok = drift <= V.maxDrift.max;
+    r[7].atMost = true;
+    r[7].label = `Dérive thermique (≤ ${V.maxDrift.max} °C/an)`;
+    r[7].progress = clamp01(V.maxDrift.max / Math.max(drift, 1e-6));
 
     return r;
   }

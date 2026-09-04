@@ -5,13 +5,16 @@
  *  Sphère légèrement plus grande que la planète, rendue en BackSide avec un
  *  blending additif : on ne voit donc que la « tranche » d'atmosphère au limbe.
  *
- *  L'intensité est pilotée par la pression (kPa) et l'oxygène (%). Au début de
- *  la partie (1,6 kPa) le halo est quasi invisible : la planète est nue.
- *  À mesure que l'atmosphère s'épaissit, un halo bleuté apparaît.
+ *  RÈGLE DE CALAGE : l'intensité doit être VRAIMENT proportionnelle à la
+ *  pression. Au début de la partie (1,6 kPa) la planète est nue : il ne doit
+ *  RIEN y avoir, pas même une frange brunâtre. Le halo ne commence à exister
+ *  qu'au-delà de ~5 kPa et n'atteint sa pleine force qu'autour de la pression
+ *  terrestre (~100 kPa).
  *
- *  Diffusion Rayleigh simplifiée : la lumière qui traverse une grande épaisseur
- *  d'atmosphère (près du terminateur) perd ses courtes longueurs d'onde et vire
- *  à l'orange ; le limbe éclairé de face reste bleu.
+ *  TEINTE : une atmosphère riche en oxygène diffuse en bleu franc (Rayleigh
+ *  d'un ciel « terrestre ») ; une atmosphère pauvre reste terne et grisée.
+ *  L'orangé n'apparaît QUE près du terminateur, en fine frange, là où la
+ *  lumière traverse réellement une grande épaisseur d'air.
  * ============================================================================
  */
 
@@ -45,40 +48,46 @@ void main() {
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 L = normalize(uSunDirection);
 
-  // Densité perçue : saturation douce de la pression (0 kPa → 0, ~100 kPa → ~1).
-  float density = 1.0 - exp(-uPressure / 42.0);
-  // L'oxygène affine la teinte : plus il est présent, plus le ciel « terrestre ».
-  float o2 = clamp(uOxygen / 21.0, 0.0, 1.4);
+  // Densité perçue. Le premier facteur coupe net sous ~5 kPa (planète nue :
+  // aucun halo), le second sature vers la pression terrestre.
+  float onset = smoothstep(4.0, 26.0, uPressure);
+  float density = onset * (1.0 - exp(-uPressure / 55.0));
+  if (density < 0.002) discard;
+
+  // Richesse en oxygène : 0 = atmosphère morte (grise), 1 = ciel terrestre.
+  float o2 = clamp(uOxygen / 20.0, 0.0, 1.15);
 
   // Fresnel : l'épaisseur optique explose au limbe.
   float rim = 1.0 - clamp(dot(N, V), 0.0, 1.0);
-  float limb = pow(rim, 3.2);
+  float limb = pow(rim, 3.0);
 
   float ndl = dot(N, L);
-  // Face éclairée (avec un débordement au-delà du terminateur : la lumière
-  // continue de se diffuser dans l'atmosphère un peu après le terminateur).
-  float lit = smoothstep(-0.35, 0.25, ndl);
+  // Face éclairée, avec un léger débordement au-delà du terminateur.
+  float lit = smoothstep(-0.30, 0.20, ndl);
 
-  // Angle de diffusion : plus la direction de vue est rasante par rapport au
-  // soleil, plus le trajet dans l'atmosphère est long → rougissement.
-  float grazing = 1.0 - smoothstep(0.0, 0.55, abs(ndl));
+  // Frange chaude : UNIQUEMENT dans la bande étroite du terminateur, là où le
+  // trajet dans l'atmosphère est le plus long. Puissance élevée = frange fine.
+  float grazing = pow(1.0 - smoothstep(0.0, 0.42, abs(ndl)), 3.0);
 
-  vec3 blue   = mix(vec3(0.28, 0.46, 0.86), vec3(0.32, 0.55, 0.95), clamp(o2, 0.0, 1.0));
-  vec3 warm   = vec3(0.98, 0.55, 0.28);
-  vec3 tint   = mix(blue, warm, grazing * 0.80);
+  // Atmosphère pauvre : bleu délavé vers un gris froid. Riche : bleu franc.
+  vec3 dull = vec3(0.30, 0.34, 0.40);
+  vec3 blue = vec3(0.26, 0.46, 0.92);
+  vec3 tint = mix(dull, blue, clamp(o2, 0.0, 1.0));
+  vec3 warm = vec3(0.95, 0.48, 0.22);
+  tint = mix(tint, warm, grazing * 0.55 * density);
 
-  // Rayleigh simplifié : le bleu s'atténue moins vite que le rouge en incidence
-  // normale, l'inverse près du terminateur.
-  vec3 scatter = tint * (0.55 + 0.45 * pow(rim, 1.4));
+  // Rayleigh simplifié : le bleu domine en incidence normale, il s'affaiblit
+  // au profit du rouge quand l'épaisseur traversée augmente.
+  vec3 scatter = tint * (0.50 + 0.50 * pow(rim, 1.5));
 
-  float intensity = limb * lit * density * (0.55 + 0.55 * uInsolation);
-  // Halo interne très léger même hors du limbe, pour « poser » la planète.
-  intensity += pow(rim, 1.1) * lit * density * 0.10;
+  float intensity = limb * lit * density * (0.45 + 0.35 * uInsolation);
+  // Halo interne très léger, pour « poser » la planète sur le fond noir.
+  intensity += pow(rim, 1.6) * lit * density * 0.07;
 
   // Un souffle très lent évite l'aspect figé.
-  intensity *= 0.94 + 0.06 * sin(uTime * 0.25);
+  intensity *= 0.95 + 0.05 * sin(uTime * 0.25);
 
-  vec3 color = scatter * uSunColor * intensity * 1.6;
+  vec3 color = scatter * uSunColor * intensity * 1.15;
 
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>

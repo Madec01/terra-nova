@@ -44,7 +44,7 @@ const TARGET_T = { low: 4, high: 22, panic: 27 };
 /**
  * Joue une partie et retourne son historique + son verdict.
  */
-function playGame(seed, years) {
+function playGame(seed, years, reckless = false) {
   const game = new Game();
   game.newGame({ seed });
   const R = game.regions, S = game.state;
@@ -107,6 +107,21 @@ function playGame(seed, years) {
       tryBuildMany('ice_extractor', 1, waterScore);
     }
     if (count('refinery') < 5) tryBuildMany('refinery', 1, (i) => R.minerals[i]);
+
+    /* --- JOUEUR IMPRUDENT : mode `--bad` -------------------------------
+       Il empile TOUT ce qui réchauffe, tout de suite, et ne démonte jamais.
+       C'est la démonstration que la partie est perdable — et pourquoi. */
+    if (reckless) {
+      tryBuildMany('ghg_factory', 2, (i) => 1 - R.pollution[i]);
+      tryBuildMany('polar_melter', 2, (i) => R.ice[i]);
+      tryBuildMany('orbital_mirror', 2, (i) => -i);
+      tryBuildMany('atmo_processor', 2, (i) => R.geothermal[i]);
+      if (g.pressure > 25) tryBuildMany('o2_generator', 2, (i) => -i);
+      if (g.temperature > -22) tryBuildMany('biodome', 2, (i) => R.habitability[i]);
+      if (g.biomass > 3) tryBuildMany('seeder', 2, (i) => R.vegetation[i]);
+      tryBuildMany('colony', 1, (i) => R.habitability[i]);
+      return;
+    }
 
     /* --- THERMOSTAT ---------------------------------------------------- */
     // Trop froid : on empile les leviers de chauffage.
@@ -209,8 +224,8 @@ function audit(run) {
 
 const f = (v, n = 1) => String(Number(v).toFixed(n)).padStart(7);
 
-function printOne(seed, years) {
-  const run = playGame(seed, years);
+function printOne(seed, years, reckless = false) {
+  const run = playGame(seed, years, reckless);
   const { state: S, regions: R, marks, victoryDay } = run;
   console.log(`\nSONDE D'ÉQUILIBRAGE — seed ${seed}, ${years} ans, ${R.count} régions\n`);
   console.log('  an       T°C     kPa     pCO2      pO2   pIner     O2%    CO2%    eau%     bio    stab      pop   insol mir  bât tech');
@@ -233,14 +248,14 @@ function printOne(seed, years) {
   return run;
 }
 
-function printMulti(n, years) {
+function printMulti(n, years, reckless = false) {
   console.log(`\nSONDE MULTI-SEEDS — ${n} seeds, ${years} ans\n`);
   console.log('     seed   victoire     T°C     kPa     O2%    CO2%    eau%     bio    stab      pop  picT anomalies');
   console.log('  ' + '─'.repeat(112));
   let wins = 0, inWindow = 0;
   for (let k = 0; k < n; k++) {
     const seed = 1000 + k * 7919;
-    const run = playGame(seed, years);
+    const run = playGame(seed, years, reckless);
     const g = run.state.globals;
     const v = run.victoryDay;
     if (v !== null) wins++;
@@ -255,6 +270,9 @@ function printMulti(n, years) {
 const arg0 = process.argv[2];
 if (arg0 === '--multi') {
   printMulti(Number(process.argv[3] ?? 6), Number(process.argv[4] ?? 60));
+} else if (arg0 === '--bad') {
+  // Contre-épreuve : la même partie jouée sans discernement doit ÉCHOUER.
+  printMulti(Number(process.argv[3] ?? 6), Number(process.argv[4] ?? 60), true);
 } else {
   printOne(Number(arg0 ?? 20260904), Number(process.argv[3] ?? 60));
 }

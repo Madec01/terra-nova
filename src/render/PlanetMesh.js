@@ -62,6 +62,9 @@ function pack6(a, b) {
   return ai * 64 + bi;
 }
 
+/** Hauteur d'eau correspondant à une cellule entièrement noyée. */
+const WATER_FULL = Math.max(1e-6, BALANCE.water?.basinDepth ?? 0.35);
+
 /** Vitesse de l'animation de révélation (unités de « reveal » par seconde). */
 const REVEAL_SPEED = 1 / 0.9;
 
@@ -300,6 +303,11 @@ export class PlanetMesh {
       uInsolation: s.uInsolation || { value: 1 },
       uTime: s.uTime || { value: 0 },
       uRadius: { value: this.radius },
+      uRelief: { value: this.reliefScale },
+      // Gonflement radial appliqué au limbe pour arrondir la silhouette du
+      // pavage (voir planetVertexShader). Ordre de grandeur de la flèche de
+      // la corde entre deux coins voisins : ~0,3 % du rayon.
+      uLimbBulge: { value: 0.008 },
       uLayerFrom: { value: 0 },
       uLayerTo: { value: 0 },
       uLayerBlend: { value: 0 },
@@ -325,12 +333,14 @@ export class PlanetMesh {
       uNightAmbient: this.uniforms.uNightAmbient,
       uInsolation: this.uniforms.uInsolation,
       uTime: this.uniforms.uTime,
-      uShallowColor: { value: new THREE.Color(0.16, 0.42, 0.58) },
-      uDeepColor: { value: new THREE.Color(0.02, 0.10, 0.24) },
+      uShallowColor: { value: new THREE.Color(0.10, 0.34, 0.50) },
+      uDeepColor: { value: new THREE.Color(0.012, 0.055, 0.155) },
       uOpacity: { value: 0 },
     };
 
-    this.oceanGeometry = new THREE.IcosahedronGeometry(1, 4);
+    // Subdivision 5 : la nappe doit être plus fine que le pavage de la surface,
+    // sinon sa propre facettisation dessine des marches sur le trait de côte.
+    this.oceanGeometry = new THREE.IcosahedronGeometry(1, 5);
     this.oceanMaterial = new THREE.ShaderMaterial({
       uniforms: this.oceanUniforms,
       vertexShader: oceanVertexShader,
@@ -339,6 +349,14 @@ export class PlanetMesh {
       depthWrite: false,
       side: THREE.FrontSide,
       blending: THREE.NormalBlending,
+      // La nappe et le relief se croisent exactement au niveau de la mer : sans
+      // biais de profondeur, des cellules entières se retrouvent à profondeur
+      // quasi identique et le test de profondeur produit un moutonnement de
+      // pixels bleus. On tire la nappe vers la caméra : le trait de côte
+      // devient net au lieu de crépiter.
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -8,
     });
     this.ocean = new THREE.Mesh(this.oceanGeometry, this.oceanMaterial);
     this.ocean.name = 'planet-ocean';
@@ -359,8 +377,8 @@ export class PlanetMesh {
     const r = this.radius * (1 + level * this.reliefScale);
     this.ocean.scale.setScalar(r);
     // Opacité : une mer naissante est une flaque, une mer installée est opaque.
-    const t = clamp01((c - 0.02) / 0.28);
-    this.oceanUniforms.uOpacity.value = 0.30 + 0.55 * (t * t * (3 - 2 * t));
+    const t = clamp01((c - 0.02) / 0.22);
+    this.oceanUniforms.uOpacity.value = 0.42 + 0.53 * (t * t * (3 - 2 * t));
   }
 
   /* ==================================================================== */
@@ -437,11 +455,15 @@ export class PlanetMesh {
 
     // Température normalisée : -120 °C → 0, +80 °C → 1.
     const tn = clamp01((temp + 120) / 200);
+    // regions.water est une HAUTEUR d'eau, plafonnée à BALANCE.water.basinDepth
+    // (0,35), pas une fraction. Sans cette normalisation le shader ne voyait
+    // jamais plus de 35 % d'eau et les océans restaient invisibles.
+    const waterN = clamp01(water / WATER_FULL);
     // Densité de lumières nocturnes : population dominante, bâtiments d'appoint.
     const night = clamp01(clamp01(pop / 6000) * 0.85 + clamp01(bc / 5) * 0.45);
 
     const d0 = tn, d1 = clamp01(moisture), d2 = clamp01(veg), d3 = clamp01(poll);
-    const i0 = biome, i1 = pack6(ice, water), i2 = this.reveal[i], i3 = pack6(minerals, geo);
+    const i0 = biome, i1 = pack6(ice, waterN), i2 = this.reveal[i], i3 = pack6(minerals, geo);
     const x0 = night, x1 = clamp01(hab), x2 = clamp01(energy), x3 = 0;
 
     const dArr = this.attrData.array;
@@ -461,7 +483,7 @@ export class PlanetMesh {
     if (Math.abs(this.reveal[i] - target) > 1e-3) this._revealing.add(i);
 
     PlanetMesh._scratch2[0] = ice;
-    PlanetMesh._scratch2[1] = water;
+    PlanetMesh._scratch2[1] = waterN;
     return PlanetMesh._scratch2;
   }
 

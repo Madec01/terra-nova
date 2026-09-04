@@ -103,9 +103,11 @@ void main() {
   float n = vnoise(vDir * 1.8) * 0.6 + vnoise(vDir * 4.3) * 0.3 + vnoise(vDir * 9.1) * 0.1;
   // Une bande de « voie lactée » diagonale, très atténuée.
   float band = exp(-pow(dot(vDir, normalize(vec3(0.42, 0.72, -0.55))) * 2.6, 2.0));
-  vec3 c = mix(uColorA, uColorB, smoothstep(0.28, 0.72, n));
-  c *= 0.35 + 0.65 * n;
-  c += uColorB * band * 0.35;
+  // Contraste marqué : l'essentiel du ciel reste au noir de fond, la nébuleuse
+  // n'existe que dans les quelques nappes où le bruit dépasse le seuil.
+  vec3 c = mix(uColorA, uColorB, smoothstep(0.46, 0.86, n));
+  c *= 0.20 + 0.80 * n * n;
+  c += uColorB * band * band * 0.55;
   gl_FragColor = vec4(c, 1.0);
   #include <colorspace_fragment>
 }
@@ -127,8 +129,11 @@ export class StarField {
     this.nebulaGeometry = new THREE.IcosahedronGeometry(SKY_RADIUS * 1.4, 2);
     this.nebulaMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        uColorA: { value: new THREE.Color(0.008, 0.010, 0.020) },
-        uColorB: { value: new THREE.Color(0.035, 0.042, 0.075) },
+        // L'espace est FRANCHEMENT sombre : c'est la planète qui doit apporter
+        // la couleur, pas le fond. Ces valeurs sont linéaires — après conversion
+        // sRGB elles donnent un noir bleuté, pas un gris-violet délavé.
+        uColorA: { value: new THREE.Color(0.0016, 0.0020, 0.0042) },
+        uColorB: { value: new THREE.Color(0.0125, 0.0150, 0.0300) },
       },
       vertexShader: nebulaVertexShader,
       fragmentShader: nebulaFragmentShader,
@@ -161,13 +166,15 @@ export class StarField {
       pos[i * 3 + 2] = Math.sin(a) * r * SKY_RADIUS;
 
       // Distribution de magnitude : beaucoup de petites, quelques grosses.
+      // L'exposant 4 creuse l'écart — un ciel contrasté a quelques étoiles
+      // franches et une poussière de très faibles, pas une bouillie uniforme.
       const m = Math.random();
-      size[i] = 0.9 + m * m * m * 5.2;
+      size[i] = 0.75 + Math.pow(m, 4) * 6.5;
       phase[i] = Math.random();
 
       const t = STAR_TINTS[(Math.random() * STAR_TINTS.length) | 0];
-      // Les étoiles faibles sont perçues plus grises.
-      const f = 0.55 + 0.45 * m;
+      // Les étoiles faibles sont perçues plus grises ET beaucoup plus ternes.
+      const f = 0.22 + 1.05 * m * m;
       tint[i * 3] = t[0] * f;
       tint[i * 3 + 1] = t[1] * f;
       tint[i * 3 + 2] = t[2] * f;
@@ -190,7 +197,10 @@ export class StarField {
       fragmentShader: starFragmentShader,
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      // depthTest ACTIF : un matériau transparent est dessiné après la passe
+      // opaque, donc sans test de profondeur les étoiles se voyaient À TRAVERS
+      // la planète (des points blancs semés sur la surface).
+      depthTest: true,
       blending: THREE.AdditiveBlending,
     });
 

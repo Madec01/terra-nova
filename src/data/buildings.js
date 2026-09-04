@@ -149,6 +149,7 @@ export const BUILDINGS = {
     // La glace sublimée rend surtout de la vapeur et un peu de CO₂ piégé.
     global: { pressure: 0.00008, co2: 0.00003 },
     maxPerRegion: 1,
+    maxTotal: 20,
     /* Le rendement suit la glace TANT QU'IL Y EN A, puis bascule sur l'eau
        libre et l'humidité. Sans cette bascule, la production d'eau s'effondrait
        exactement au moment où la planète dégelait : les colonies mouraient de
@@ -171,8 +172,12 @@ export const BUILDINGS = {
     // Levier de réchauffement le plus rapide : du CO₂ pur, peu d'inertes.
     // 12 usines ≈ +0,96 kPa de CO₂ par an, soit ~+10 °C d'effet de serre en
     // une douzaine d'années.
-    global: { co2: 0.00016, pressure: 0.00006, stability: -0.0016 },
+    global: { co2: 0.00014, pressure: 0.00006, stability: -0.0016 },
     maxPerRegion: 1,
+    // Plafonds planétaires : ces installations sont des mégastructures, pas
+    // du mobilier urbain. Sans plafond, un joueur pouvait en poser une par
+    // région (642 !) et faire saturer l'atmosphère par la seule quantité.
+    maxTotal: 16,
     /* Les halocarbures se photodissocient : plus le CO₂ est déjà abondant,
        moins l'usine en ajoute. C'est le frein qui empêche l'emballement de
        l'effet de serre — et ce qui rend la surchauffe corrigeable. */
@@ -190,8 +195,9 @@ export const BUILDINGS = {
     // Levier de PRESSION : des inertes, presque pas de CO₂.
     // 14 processeurs ≈ +4 kPa/an → il faut une quinzaine d'années pour
     // amener l'atmosphère de 5 à ~70 kPa : c'est le tempo de la partie.
-    global: { pressure: 0.00050, co2: 0.00003 },
+    global: { pressure: 0.00044, co2: 0.00003 },
     maxPerRegion: 1,
+    maxTotal: 18,
     /* Le rendement s'effondre quand l'atmosphère devient épaisse : le régolithe
        ne rend plus ses gaz contre la pression ambiante. C'est ce qui empêche
        la pression de saturer même si le joueur oublie ses processeurs. */
@@ -209,8 +215,9 @@ export const BUILDINGS = {
     // `oxygen` est une CONVERSION CO₂ → O₂ : inutile (et faux) d'y ajouter un
     // `co2` négatif, le craquage débite déjà le réservoir de CO₂.
     // 12 générateurs ≈ +1,5 kPa d'O₂ par an, prélevés sur le CO₂.
-    global: { oxygen: 0.00025, stability: 0.0004 },
+    global: { oxygen: 0.00022, stability: 0.0004 },
     maxPerRegion: 1,
+    maxTotal: 14,
     /* Le craquage travaille contre la contre-pression d'oxygène déjà présente :
        le rendement s'annule vers `o2Ceiling`. Sans ce frein, les générateurs
        vidaient tout le CO₂ et regelaient la planète. */
@@ -229,6 +236,7 @@ export const BUILDINGS = {
     // La calotte est surtout de la glace carbonique : elle rend du CO₂.
     global: { pressure: 0.00008, co2: 0.00008 },
     maxPerRegion: 1,
+    maxTotal: 10,
   },
 
   orbital_mirror: {
@@ -256,6 +264,7 @@ export const BUILDINGS = {
     requires: { tech: 'climate_control' },
     global: { stability: 0.030 },
     maxPerRegion: 1,
+    maxTotal: 6,
     dampening: 0.10,
   },
 
@@ -273,6 +282,7 @@ export const BUILDINGS = {
     // Craquage d'appoint : symbolique à côté de la photosynthèse planétaire.
     global: { oxygen: 0.00006 },
     maxPerRegion: 1,
+    maxTotal: 20,
   },
 
   seeder: {
@@ -285,6 +295,7 @@ export const BUILDINGS = {
     local: { vegetation: 0.0030 },
     spread: { radius: 1, vegetation: 0.0022 },
     maxPerRegion: 1,
+    maxTotal: 14,
   },
 
   /* ------------------------------------------------------------------ */
@@ -299,6 +310,7 @@ export const BUILDINGS = {
     requires: { tech: 'colonization', habitability: 0.45 },
     local: { pollution: 0.0012 },
     maxPerRegion: 1,
+    maxTotal: 12,
     colony: true,
   },
 };

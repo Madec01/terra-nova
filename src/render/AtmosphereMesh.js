@@ -61,12 +61,15 @@ export class AtmosphereMesh {
     this.uniforms.uPressure.value = p;
     this.uniforms.uOxygen.value = Math.max(0, oxygen || 0);
 
-    // Épaisseur visible : de +2 % (planète nue) à +9 % du rayon (atmosphère dense).
-    const thick = 0.020 + 0.070 * clamp01(1 - Math.exp(-p / 38));
+    // Épaisseur visible : de +1,5 % (atmosphère résiduelle) à +8 % du rayon
+    // (atmosphère dense). La coquille reste au-dessus du relief maximal.
+    const thick = 0.015 + 0.065 * clamp01(1 - Math.exp(-p / 38));
     this.mesh.scale.setScalar(this.radius * (1 + thick));
 
-    // Sous une pression ridicule, on éteint carrément le mesh : rien à dessiner.
-    this.mesh.visible = p > 0.05;
+    // Sous ~4 kPa il n'y a rien à dessiner : le shader renverrait de toute
+    // façon une intensité nulle, autant économiser la passe entière. C'est ce
+    // qui garantit une planète de départ VRAIMENT nue, sans frange brunâtre.
+    this.mesh.visible = p > 4.0;
   }
 
   dispose() {

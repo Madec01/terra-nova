@@ -42,6 +42,25 @@ baisse l'albédo, ce qui réchauffe encore (rétroaction glace-albédo) ; la vap
 d'eau amplifie l'effet de serre ; une biosphère introduite trop vite s'effondre ;
 la pollution industrielle freine la végétation et ronge la stabilité climatique.
 
+## Gagner
+
+La planète doit tenir **huit conditions simultanément pendant 180 jours** :
+température entre 0 et 30 °C, pression, oxygène, eau liquide, biomasse,
+population, stabilité climatique — et surtout **une dérive thermique quasi
+nulle**. Cette dernière condition est ce qui distingue la terraformation d'un
+emballement : traverser la bonne fourchette en surchauffant ne suffit pas, il
+faut y stabiliser le monde. Tout est réglable dans `BALANCE.victory`.
+
+```bash
+node tools/balance-probe.mjs                 # une partie jouée automatiquement, an par an
+node tools/balance-probe.mjs --multi 6 70    # 6 seeds : la partie est-elle gagnable ?
+node tools/balance-probe.mjs --bad 6 70      # joueur imprudent : doit majoritairement échouer
+```
+
+Mesures actuelles : joueur soigneux **6/6 victoires** entre l'an 22 et l'an 33 ;
+joueur imprudent **1/6**, les autres finissant en surchauffe hors de la bande
+habitable.
+
 ## Contrôles
 
 | Action | Souris / clavier | Tactile |

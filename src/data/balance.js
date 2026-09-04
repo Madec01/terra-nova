@@ -218,8 +218,10 @@ export const BALANCE = {
   /*  STABILITÉ CLIMATIQUE                                                 */
   /* --------------------------------------------------------------------- */
   stability: {
-    /** Récupération naturelle par jour. */
-    recovery: 0.020,
+    /** Récupération naturelle par jour. Volontairement lente : à 0,020 la
+        stabilité remontait à 100 quoi que fasse le joueur et cessait d'être
+        un levier de tension. */
+    recovery: 0.008,
     /** Pénalité pour variation rapide de température (par °C/an au-delà du seuil). */
     tempRateThreshold: 1.2,
     tempRatePenalty: 3.2,
@@ -377,6 +379,13 @@ export const BALANCE = {
     biomass: { min: 45 },
     population: { min: 15000 },
     stability: { min: 75 },
+    /**
+     * Le climat doit avoir CESSÉ DE DÉRIVER (°C/an en valeur absolue).
+     * Sans cette condition, une planète en pleine surchauffe traversait la
+     * fourchette 0–30 °C assez lentement pour valider les 180 jours au passage
+     * et gagner « sans le faire exprès ». Terraformer, c'est stabiliser.
+     */
+    maxDrift: { max: 1.5 },
     /** Toutes les conditions doivent tenir ce nombre de jours consécutifs. */
     sustainDays: 180,
   },

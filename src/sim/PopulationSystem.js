@@ -66,25 +66,32 @@ export class PopulationSystem {
         + regions.moisture[b.region]);
       const waterRelief = clamp01(localWater * C.localWaterRelief);
       const foodRelief = clamp01(veg * (C.farmPer1k.biomass / C.upkeepPer1k.biomass));
-      const thirsty = dryStock && waterRelief < 1;
-      const hungry = emptyStock && foodRelief < 1;
+
+      /* PÉNURIE PROPORTIONNELLE, et non tout-ou-rien. L'ancienne règle
+         (« stock vide → on perd 0,8 % par jour ») était un couperet : une
+         colonie couvrant 98 % de ses besoins sur place s'éteignait exactement
+         comme une colonie qui n'en couvrait aucun. On mesure donc le
+         MANQUE réel, et la démographie y répond continûment :
+         la pénurie freine la croissance ET ronge l'effectif au prorata. */
+      const shortage = clamp01(Math.max(
+        dryStock ? 1 - waterRelief : 0,
+        emptyStock ? 1 - foodRelief : 0));
 
       if (b.active !== false && dt > 0) {
         const capacity = Math.max(1, C.capacityPerColony * hab);
-        if (thirsty || hungry) {
-          // Famine : la population décroît tant que les vivres manquent.
-          pop -= pop * C.starvationRate * dt;
-          famine = true;
-        } else {
-          // Tant que la région reste viable, la noria de transport maintient
-          // au moins l'effectif de fondation : une colonie vidée par une
-          // famine peut donc repartir (pop = 0 serait un état absorbant).
-          if (hab >= BALANCE.colony.minHabitability && pop < C.seedPopulation) {
-            pop = C.seedPopulation;
-          }
-          // Croissance logistique modulée par l'habitabilité.
-          pop += C.growthRate * hab * pop * (1 - pop / capacity) * dt;
+        if (shortage > 0) {
+          pop -= pop * C.starvationRate * shortage * dt;
+          // On n'alerte le joueur que pour une disette réelle, pas pour un
+          // appoint marginal apporté par les stocks.
+          if (shortage > 0.25) famine = true;
+        } else if (hab >= BALANCE.colony.minHabitability && pop < C.seedPopulation) {
+          // Tant que la région reste viable ET approvisionnée, la noria de
+          // transport maintient au moins l'effectif de fondation : une colonie
+          // vidée par une famine peut repartir (pop = 0 serait absorbant).
+          pop = C.seedPopulation;
         }
+        // Croissance logistique, amortie par la pénurie.
+        pop += C.growthRate * hab * pop * (1 - pop / capacity) * (1 - shortage) * dt;
         pop = clamp(pop, 0, C.capacityPerColony);
       }
       b.population = pop;
