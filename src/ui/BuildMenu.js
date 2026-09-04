@@ -66,21 +66,47 @@ export class BuildMenu {
       v._key = k;
     }
     const status = el('div', { class: 'tn-card-status' });
-    const card = el('button', {
-      class: 'tn-card', type: 'button', dataset: { type: def.id },
+
+    // Bouton d'information : au doigt, il n'y a pas de survol. Il ouvre
+    // EXACTEMENT le contenu que la souris obtient en survolant la carte.
+    const info = el('button', {
+      class: 'tn-icon-btn tn-card-info', type: 'button',
+      'aria-label': `Détail de l’installation ${def.name}`, text: 'ⓘ',
+    });
+    this.tooltip?.attach(info, () => this._tip(def), { tap: 'always' });
+    this._offs.push(on(info, 'click', (e) => e.stopPropagation()));
+
+    // `div[role=button]` et non `<button>` : un bouton ne peut pas en contenir
+    // un autre, et la carte a besoin de son bouton « ⓘ ».
+    const card = el('div', {
+      class: 'tn-card', role: 'button', tabindex: '0', dataset: { type: def.id },
     },
       el('div', { class: 'tn-card-head' },
         el('span', { class: 'tn-card-icon', 'aria-hidden': 'true', text: def.icon || '▢' }),
         el('span', { class: 'tn-card-name', text: def.name }),
-        el('span', { class: 'tn-card-tier', text: 'T' + (def.tier || 1) })),
+        el('span', { class: 'tn-card-tier', text: 'T' + (def.tier || 1) }),
+        info),
       cost,
       el('div', { class: 'tn-card-effects' }, effectLines(def)),
       status);
 
     this.tooltip?.attach(card, () => this._tip(def));
-    this._offs.push(on(card, 'click', () => {
-      if (card.classList.contains('is-locked')) return;
+    const activate = () => {
+      if (card.classList.contains('is-locked')) {
+        // Un bouton qui ne répond pas est perçu comme cassé : on dit pourquoi.
+        const techId = def.requires?.tech;
+        this.game.bus?.emit('notify', {
+          text: `${def.name} requiert la technologie « ${TECHNOLOGIES[techId]?.name ?? techId} ».`,
+          kind: 'warn', icon: '⌬',
+        });
+        this.ui?.openPanel?.('research');
+        return;
+      }
       this.ui?.startPlacement?.(def.id);
+    };
+    this._offs.push(on(card, 'click', activate));
+    this._offs.push(on(card, 'keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
     }));
     this.cards.set(def.id, { def, card, cost, status });
     return card;

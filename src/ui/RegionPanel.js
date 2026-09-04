@@ -3,6 +3,7 @@
  * Lit exclusivement `game.regions.getRegionView(id)` et l'état de jeu.
  */
 import { el, clear, bar, on } from './dom.js';
+import { sheetDrag } from './sheet.js';
 import { BALANCE } from '../data/balance.js';
 import { BIOMES } from '../data/biomes.js';
 import { BUILDINGS } from '../data/buildings.js';
@@ -46,6 +47,8 @@ export class RegionPanel {
     this._signature = '';
     this._confirmId = null;
     this._confirmTimer = 0;
+    this.expanded = true;      // sur téléphone, la feuille s'ouvre « réduite »
+    this._suppressed = false;  // masquée au profit d'une autre feuille
     this._offs = [];
   }
 
@@ -69,20 +72,33 @@ export class RegionPanel {
       if (this.regionId != null) this.scene?.focusRegion?.(this.regionId);
     }));
     this._offs.push(on(closeBtn, 'click', () => this.game.selectRegion(null)));
-    this._offs.push(on(collapseBtn, 'click', () => {
-      const c = this.node.classList.toggle('is-collapsed');
-      collapseBtn.textContent = c ? '▴' : '▾';
-      collapseBtn.setAttribute('aria-label', c ? 'Déplier le panneau' : 'Replier le panneau');
-    }));
+    this.collapseBtn = collapseBtn;
+    this._offs.push(on(collapseBtn, 'click', () => this.toggleExpanded()));
+
+    this.grab = el('button', {
+      class: 'tn-sheet-grab', type: 'button',
+      'aria-label': 'Déplier, replier ou fermer la fiche du secteur',
+    }, el('i', { 'aria-hidden': 'true' }));
+    this._offs.push(on(this.grab, 'click', () => this.toggleExpanded()));
 
     this.node = el('aside', {
       class: 'tn-panel tn-region', role: 'region', 'aria-label': 'Secteur sélectionné',
     },
+      this.grab,
       el('header', { class: 'tn-panel-head' },
         el('div', { class: 'tn-panel-head-main' }, this.titleNode, this.coordNode),
         el('div', { class: 'tn-panel-head-tools' }, focusBtn, collapseBtn, closeBtn)),
       this.body);
     this.node.hidden = true;
+
+    // Glisser vers le bas replie puis ferme ; glisser vers le haut déplie.
+    this._offs.push(sheetDrag(this.node, this.grab, {
+      enabled: () => this.ui?.isPhone === true,
+      expanded: () => this.expanded,
+      onExpand: () => this.setExpanded(true),
+      onCollapse: () => this.setExpanded(false),
+      onClose: () => this.game.selectRegion(null),
+    }));
     return this.node;
   }
 
@@ -94,7 +110,44 @@ export class RegionPanel {
     this.regionId = (id == null || id < 0) ? null : id;
     this._signature = '';
     this._confirmId = null;
+    // Sur téléphone la fiche s'ouvre réduite : la planète reste visible.
+    this.expanded = !this.ui?.isPhone;
     this.rebuild();
+  }
+
+  /**
+   * Masque la fiche sans perdre la sélection : sur téléphone une seule
+   * feuille est ouverte à la fois.
+   */
+  suppress(on_) {
+    const v = !!on_;
+    if (this._suppressed === v) return;
+    this._suppressed = v;
+    this._applyVisibility();
+  }
+
+  setExpanded(v) {
+    this.expanded = !!v;
+    this._applyState();
+  }
+
+  toggleExpanded() { this.setExpanded(!this.expanded); }
+
+  _applyState() {
+    if (!this.node) return;
+    const peek = this.ui?.isPhone && !this.expanded;
+    this.node.classList.toggle('is-peek', !!peek);
+    if (this.collapseBtn) {
+      this.collapseBtn.textContent = this.expanded ? '▾' : '▴';
+      this.collapseBtn.setAttribute('aria-label', this.expanded ? 'Réduire la fiche' : 'Déplier la fiche');
+    }
+  }
+
+  _applyVisibility() {
+    if (!this.node) return;
+    const none = this.regionId == null || !this.game.regions || this.regionId >= this.game.regions.count;
+    this.node.hidden = none || this._suppressed;
+    this.node.classList.toggle('has-region', !none);
   }
 
   /** Reconstruction complète du corps du panneau (rare). */
@@ -103,13 +156,13 @@ export class RegionPanel {
     const id = this.regionId;
     const regions = this.game.regions;
     if (id == null || !regions || id >= regions.count) {
-      this.node.hidden = true;
+      this._applyVisibility();
       this.refs = null;
       clear(this.body);
       return;
     }
-    this.node.hidden = false;
-    this.node.classList.remove('is-collapsed');
+    this._applyVisibility();
+    this._applyState();
 
     const view = this._view(id);
     setText(this.titleNode, 'Secteur ' + String(id).padStart(3, '0'));
@@ -157,10 +210,18 @@ export class RegionPanel {
     const cost = BALANCE.exploration.scanCost || {};
     const costText = Object.keys(cost).map((k) => `${cost[k]}${NB}${labelResource(k)}`).join(', ') || 'gratuit';
 
-    const btn = el('button', { class: 'tn-btn tn-btn--primary', type: 'button' },
+    const btn = el('button', { class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button' },
       el('span', { text: 'Lancer un scan orbital' }),
       el('small', { text: `${costText} · ${days}${NB}j` }));
+    const chain = el('button', { class: 'tn-btn tn-btn--wide', type: 'button' },
+      el('span', { text: 'Enchaîner les scans' }),
+      el('small', { text: 'chaque appui sur un secteur sombre met un scan en file' }));
+    const cancel = el('button', { class: 'tn-btn tn-btn--wide', type: 'button', text: 'Annuler ce scan' });
+    cancel.hidden = true;
+
     const hint = el('p', { class: 'tn-hint' });
+    const fleet = el('p', { class: 'tn-hint tn-scan-fleet' });
+    const status = el('div', { class: 'tn-scan-state' });
     const progWrap = el('div', { class: 'tn-scan' },
       el('div', { class: 'tn-row-label', text: 'Scan en cours' }),
       el('span', { class: 'tn-scan-eta' }));
@@ -173,14 +234,22 @@ export class RegionPanel {
       this.game.scanRegion(this.regionId);
       this.rebuild();
     }));
+    this._offs.push(on(chain, 'click', () => this.ui?.toggleScanMode?.()));
+    this._offs.push(on(cancel, 'click', () => {
+      if (this.regionId == null) return;
+      if (typeof this.game.cancelScan === 'function') this.game.cancelScan(this.regionId);
+      this.rebuild();
+    }));
 
-    this.body.appendChild(el('div', { class: 'tn-unknown' },
-      el('div', { class: 'tn-unknown-glyph', 'aria-hidden': 'true', text: '?' }),
+    this.body.appendChild(el('div', { class: 'tn-region-summary tn-unknown' },
       el('div', { class: 'tn-unknown-title', text: 'Secteur non cartographié' }),
-      el('p', { class: 'tn-hint', text: 'Aucune donnée orbitale disponible pour ce secteur. Un scan révélera son relief, ses ressources et son climat.' }),
-      btn, hint, progWrap));
+      el('p', { class: 'tn-hint', text: 'Aucune donnée orbitale. Un scan révèle son relief, ses ressources, son climat — et souvent ses voisins.' }),
+      status, progWrap, btn, cancel, chain, hint, fleet));
 
-    this.refs.scan = { btn, hint, progWrap, progBar, eta: progWrap.querySelector('.tn-scan-eta') };
+    this.refs.scan = {
+      btn, chain, cancel, hint, fleet, status, progWrap, progBar,
+      eta: progWrap.querySelector('.tn-scan-eta'),
+    };
   }
 
   /* ------------------------------------------------------------------ */
@@ -195,22 +264,36 @@ export class RegionPanel {
     refs.placeStrip.hidden = true;
     this.body.appendChild(refs.placeStrip);
 
-    // --- identité ------------------------------------------------------
+    /* --- L'ESSENTIEL -------------------------------------------------
+       Ce bloc reste visible même quand la feuille est réduite sur
+       téléphone : biome, température, habitabilité, action principale. */
     refs.biome = el('span', { class: 'tn-badge' });
     refs.anomaly = el('span', { class: 'tn-badge tn-badge--anomaly', text: 'Anomalie' });
     refs.anomaly.hidden = true;
-    this.body.appendChild(el('div', { class: 'tn-badges' }, refs.biome, refs.anomaly));
+    refs.landing = el('span', { class: 'tn-badge tn-badge--landing', text: 'Site d’atterrissage' });
+    refs.landing.hidden = true;
 
-    // --- valeurs scalaires ---------------------------------------------
+    const mini = el('div', { class: 'tn-kv tn-kv--mini' });
+    refs.temperature = this._kv(mini, 'Température');
+    refs.habitability = this._kv(mini, 'Habitabilité');
+    refs.buildCount = this._kv(mini, 'Installations');
+
+    const buildBtn = el('button', { class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button', text: 'Construire ici' });
+    this._offs.push(on(buildBtn, 'click', () => this.ui?.openBuildMenuFor?.(this.regionId)));
+
+    this.body.appendChild(el('div', { class: 'tn-region-summary' },
+      el('div', { class: 'tn-badges' }, refs.biome, refs.anomaly, refs.landing),
+      mini, buildBtn));
+
+    // --- LE DÉTAIL (replié sur téléphone) ------------------------------
+    const details = el('div', { class: 'tn-region-details' });
+
     const grid = el('div', { class: 'tn-kv' });
-    refs.temperature = this._kv(grid, 'Température');
     refs.elevation = this._kv(grid, 'Altitude');
     refs.population = this._kv(grid, 'Population');
-    refs.buildCount = this._kv(grid, 'Installations');
-    this.body.appendChild(grid);
+    details.appendChild(grid);
 
-    // --- barres 0..1 ----------------------------------------------------
-    this.body.appendChild(el('div', { class: 'tn-section-title', text: 'Relevés de surface' }));
+    details.appendChild(el('div', { class: 'tn-section-title', text: 'Relevés de surface' }));
     const list = el('div', { class: 'tn-rows' });
     for (const row of RATIO_ROWS) {
       const value = el('span', { class: 'tn-row-value' });
@@ -220,18 +303,14 @@ export class RegionPanel {
       list.appendChild(node);
       refs.rows.set(row.key, { def: row, value, bar: b });
     }
-    this.body.appendChild(list);
+    details.appendChild(list);
 
-    // --- bâtiments ------------------------------------------------------
     refs.buildTitle = el('div', { class: 'tn-section-title', text: 'Installations' });
     refs.buildList = el('div', { class: 'tn-blist' });
-    this.body.appendChild(refs.buildTitle);
-    this.body.appendChild(refs.buildList);
+    details.appendChild(refs.buildTitle);
+    details.appendChild(refs.buildList);
 
-    // --- action ---------------------------------------------------------
-    const buildBtn = el('button', { class: 'tn-btn tn-btn--primary', type: 'button', text: 'Construire ici' });
-    this._offs.push(on(buildBtn, 'click', () => this.ui?.openBuildMenuFor?.(this.regionId)));
-    this.body.appendChild(buildBtn);
+    this.body.appendChild(details);
   }
 
   _kv(parent, label) {
@@ -262,8 +341,10 @@ export class RegionPanel {
 
     setText(refs.biome, biomeName(view.biome));
     refs.anomaly.hidden = !view.anomaly;
+    refs.landing.hidden = !(view.isLandingSite || this.game.regions?.landingSite === this.regionId);
 
     setText(refs.temperature, (view.temperature ?? 0).toFixed(1).replace('-', '−') + NB + '°C');
+    setText(refs.habitability, ((view.habitability ?? 0) * 100).toFixed(0) + NB + '%');
     setText(refs.elevation, elevationLabel(view.elevation ?? 0));
     const pop = view.population ?? 0;
     setText(refs.population, pop >= 1 ? formatNumber(pop, 0) + NB + 'hab.' : '—');
@@ -283,18 +364,50 @@ export class RegionPanel {
 
   _updateScan(state, scan) {
     const id = this.regionId;
-    const running = (state.explore?.scanning || []).find((s) => s.region === id);
+    const ex = state.explore || {};
+    const running = (ex.scanning || []).find((s) => s.region === id);
+    const queue = Array.isArray(ex.queue) ? ex.queue : null;
+    const qIndex = queue ? queue.findIndex((q) => (q?.region ?? q) === id) : -1;
+
+    // Flotte : sondes libres et file d'attente, quand l'API les expose.
+    const total = Math.max(0, ex.probes ?? 0) * (BALANCE.exploration.scansPerProbe || 1);
+    const busy = ex.scanning?.length ?? 0;
+    const free = Number.isFinite(ex.probesFree) ? ex.probesFree : Math.max(0, total - busy);
+    const parts = [`${free}${NB}sonde${free > 1 ? 's' : ''} libre${free > 1 ? 's' : ''} sur ${total}`];
+    if (queue) parts.push(`${queue.length}${NB}en file`);
+    setText(scan.fleet, parts.join(' · '));
+
+    const chaining = this.ui?.scanMode === true;
+    setText(scan.chain.firstChild, chaining ? 'Arrêter l’enchaînement' : 'Enchaîner les scans');
+    scan.chain.classList.toggle('is-active', chaining);
+
     if (running) {
       scan.progWrap.hidden = false;
-      const total = running.total || BALANCE.exploration.scanDays;
-      const done = Math.max(0, total - (running.remaining ?? 0));
-      scan.progBar.setValue(done, total);
+      const totalDays = running.total || BALANCE.exploration.scanDays;
+      const done = Math.max(0, totalDays - (running.remaining ?? 0));
+      scan.progBar.setValue(done, totalDays);
       setText(scan.eta, `${Math.ceil(running.remaining ?? 0)}${NB}j restants`);
-      scan.btn.disabled = true;
+      setText(scan.status, 'Sonde en approche');
+      scan.status.hidden = false;
+      scan.btn.hidden = true;
+      scan.cancel.hidden = typeof this.game.cancelScan !== 'function';
       setText(scan.hint, '');
       return;
     }
+
     scan.progWrap.hidden = true;
+    if (qIndex >= 0) {
+      setText(scan.status, `En file d’attente · position ${qIndex + 1}`);
+      scan.status.hidden = false;
+      scan.btn.hidden = true;
+      scan.cancel.hidden = typeof this.game.cancelScan !== 'function';
+      setText(scan.hint, 'Une sonde s’en chargera dès qu’elle se libère.');
+      return;
+    }
+
+    scan.status.hidden = true;
+    scan.cancel.hidden = true;
+    scan.btn.hidden = false;
     const reason = this._scanBlockReason(state);
     scan.btn.disabled = !!reason;
     setText(scan.hint, reason || '');
@@ -308,6 +421,9 @@ export class RegionPanel {
         return `${labelResource(k)}${NB}: ${cost[k]} requis, ${Math.floor(state.resources?.[k] ?? 0)} disponibles.`;
       }
     }
+    // Avec une file d'attente, une sonde occupée n'empêche plus de demander un
+    // scan : la demande est simplement empilée.
+    if (Array.isArray(ex.queue)) return '';
     const slots = Math.max(0, (ex.probes ?? 0)) * (BALANCE.exploration.scansPerProbe || 1);
     if (slots > 0 && (ex.scanning?.length ?? 0) >= slots) {
       return `Toutes les sondes sont occupées (${ex.scanning.length}/${slots}).`;

@@ -51,10 +51,19 @@ function boot() {
   /*  Ponts entre les couches                                            */
   /* ------------------------------------------------------------------ */
 
+  // Cadrer la caméra sur le site d'atterrissage et l'y sélectionner : sans
+  // cela, deux parties sur cinq commencent face à l'hémisphère caché et le
+  // joueur ne sait pas que ses sept secteurs connus sont derrière (PLAYTEST B3).
   const onWorldReset = () => {
     scene.setPlanet(game.regions, game.state);
     scene.syncBuildings(game.state);
-    scene.setSelected(null);
+    const site = game.regions?.landingSite;
+    if (Number.isInteger(site) && site >= 0 && site < game.regions.count) {
+      scene.focusRegion(site);
+      game.selectRegion(site);
+    } else {
+      scene.setSelected(null);
+    }
     document.title = `TERRA NOVA · ${makeSeedLabel(game.state.seed)}`;
   };
   game.bus.on('game:new', onWorldReset);
@@ -135,6 +144,18 @@ function boot() {
   }
 
   window.addEventListener('resize', () => scene.resize());
+  // Le changement d'orientation redimensionne la fenêtre APRÈS l'événement :
+  // on repasse un peu plus tard, sinon le canvas garde l'ancien rapport.
+  window.addEventListener('orientationchange', () => setTimeout(() => scene.resize(), 250));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => scene.resize());
+  }
+
+  // iOS : pincer ou taper deux fois zoomerait la PAGE au lieu de la planète.
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  }
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
   window.addEventListener('beforeunload', () => { running = false; });
   document.addEventListener('visibilitychange', () => { last = performance.now(); });
 

@@ -769,6 +769,35 @@
   transition: opacity var(--tn-fast) ease;
 }
 .tn-tooltip.is-visible { opacity: 1; }
+.tn-tip-close { display: none; }
+
+/* Présentation « appui » : le même contenu, dans un panneau qu'on referme.
+   Ancré en bas, au-dessus des onglets, à portée du pouce. */
+.tn-tooltip.is-tap {
+  position: fixed;
+  left: 8px; right: 8px;
+  top: auto;
+  bottom: calc(var(--tn-bottom-h) + 8px);
+  max-width: none;
+  max-height: 56vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  pointer-events: auto;
+  padding-top: 40px;
+  z-index: 80;
+  animation: tn-slide-in var(--tn-slow) ease;
+}
+.tn-tooltip.is-tap .tn-tip-close {
+  display: inline-flex;
+  position: absolute;
+  top: 2px; right: 2px;
+  min-width: 44px; height: 44px;
+  font-size: 18px;
+}
+.tn-tooltip.is-tap .tn-tip { min-width: 0; }
+.tn-tooltip.is-tap .tn-tip-row { line-height: 1.9; font-size: 12px; }
+.tn-tooltip.is-tap .tn-tip-note { max-width: none; font-size: 11px; }
 
 .tn-tip { min-width: 200px; }
 .tn-tip-title {
@@ -970,3 +999,199 @@
   .tn-menu-title { font-size: 22px; letter-spacing: 0.22em; }
   .tn-victory-body { grid-template-columns: 1fr; }
 }
+
+
+/* ===================================================================== */
+/*  MOBILE — barre d'onglets, feuilles, voile, amorce                    */
+/* ===================================================================== */
+
+/* --- Barre d'onglets du bas ------------------------------------------ */
+.tn-tabbar { display: none; }
+
+html.tn-phone .tn-tabbar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  height: var(--tn-tabbar-h);
+  border-top: 1px solid var(--tn-line);
+}
+
+.tn-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: var(--tn-tabbar-h);
+  padding: 2px;
+  color: var(--tn-dim);
+  border-top: 2px solid transparent;
+  transition: color var(--tn-fast) ease, background var(--tn-fast) ease;
+}
+.tn-tab-icon { font-size: 17px; line-height: 1; }
+.tn-tab-label {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.tn-tab.is-active {
+  color: var(--tn-accent);
+  background: var(--tn-accent-soft);
+  border-top-color: var(--tn-accent);
+}
+.tn-tab:active { background: rgba(255, 255, 255, 0.06); }
+
+/* --- Contrôles du temps en mode mobile -------------------------------- */
+html.tn-phone .tn-timebar {
+  height: var(--tn-timerow-h);
+  padding: 0 8px;
+  gap: 8px;
+  justify-content: space-between;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html.tn-phone .tn-speeds { gap: 4px; }
+html.tn-phone .tn-speed { min-width: 44px; height: 40px; font-size: 12px; }
+html.tn-phone .tn-fps { display: none; }
+html.tn-phone .tn-time-info { text-align: right; }
+
+/* --- Poignée de feuille ---------------------------------------------- */
+.tn-sheet-grab { display: none; }
+
+html.tn-phone .tn-sheet-grab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 44px;            /* cible tactile : c'est le bouton « refermer » */
+  min-height: 44px;
+  flex: 0 0 auto;
+  touch-action: none;
+  background: rgba(8, 12, 18, 0.55);
+}
+.tn-sheet-grab i {
+  display: block;
+  width: 46px;
+  height: 4px;
+  background: var(--tn-line-2);
+  border-radius: 2px;
+}
+.tn-sheet-grab:active i { background: var(--tn-accent); }
+
+/* Une feuille suit le doigt sans transition, puis reprend sa place. */
+html.tn-phone .tn-dock,
+html.tn-phone .tn-region { transition: transform var(--tn-fast) ease; will-change: transform; }
+html.tn-phone .tn-dock.is-dragging,
+html.tn-phone .tn-region.is-dragging { transition: none; }
+
+/* Le contenu des feuilles se fait défiler au doigt sans entraîner la page. */
+html.tn-phone .tn-panel-body,
+html.tn-phone .tn-dock-body {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* --- Voile ------------------------------------------------------------ */
+.tn-scrim { display: none; }
+html.tn-phone .tn-scrim {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(4, 6, 10, 0.45);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+}
+
+/* --- Fiche de secteur : l'essentiel, puis le détail ------------------- */
+.tn-region-summary { margin-bottom: 8px; }
+.tn-kv--mini { grid-template-columns: repeat(3, 1fr); }
+.tn-badge--landing {
+  color: #ffd9a0;
+  background: rgba(224, 163, 74, 0.12);
+  border-color: rgba(224, 163, 74, 0.45);
+}
+.tn-region-summary .tn-btn--wide { margin-bottom: 0; }
+.tn-scan-state {
+  font-family: var(--tn-mono);
+  font-size: 11px;
+  color: var(--tn-accent);
+  margin-bottom: 6px;
+}
+.tn-scan-fleet { margin-bottom: 0; }
+.tn-unknown { text-align: left; padding: 4px 0; }
+.tn-unknown .tn-unknown-title { text-align: left; }
+
+/* --- Recherche en cours ---------------------------------------------- */
+.tn-current {
+  padding: 8px;
+  margin-bottom: 10px;
+  background: var(--tn-accent-soft);
+  border: 1px solid var(--tn-accent-line);
+}
+.tn-current-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.tn-current .tn-section-title { padding: 0 0 4px; border: 0; margin: 0; }
+.tn-current-name { font-size: 12px; margin-bottom: 6px; }
+.tn-current-eta { font-family: var(--tn-mono); font-size: 10px; color: var(--tn-accent); }
+.tn-current .tn-bar { margin-bottom: 8px; height: 6px; }
+.tn-tech.is-current { border-color: var(--tn-accent); background: var(--tn-accent-soft); }
+.tn-tech.is-current .tn-tech-state { color: var(--tn-accent); }
+
+/* --- Exploration (panneau Planète) ------------------------------------ */
+.tn-explore { margin-bottom: 10px; }
+.tn-explore-line {
+  font-family: var(--tn-mono);
+  font-size: 11px;
+  color: var(--tn-dim);
+  margin-bottom: 6px;
+}
+.tn-btn.is-active {
+  color: var(--tn-accent);
+  border-color: var(--tn-accent);
+  background: var(--tn-accent-soft);
+}
+
+/* --- Bouton d'information des cartes ---------------------------------- */
+.tn-card-info {
+  flex: 0 0 auto;
+  min-width: 44px;
+  height: 44px;
+  margin: -8px -6px -8px 0;
+  font-size: 15px;
+  color: var(--tn-accent-2);
+}
+.tn-tech .tn-card-info { margin: -6px -6px -6px 0; }
+
+/* Les cartes sont des `div[role=button]` : elles doivent rester lisibles
+   comme des boutons. */
+.tn-card, .tn-tech { cursor: pointer; }
+.tn-card[aria-disabled="true"], .tn-tech[aria-disabled="true"] { cursor: default; }
+
+/* --- Amorce des premières minutes ------------------------------------- */
+.tn-hintbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px 7px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--tn-text);
+  background: rgba(14, 20, 29, 0.94);
+  border: 1px solid var(--tn-accent-line);
+  border-left: 3px solid var(--tn-accent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--tn-shadow);
+  animation: tn-slide-in var(--tn-slow) ease;
+}
+.tn-hintbar-icon { color: var(--tn-accent); font-family: var(--tn-mono); }
+.tn-hint-text { flex: 1 1 auto; }
+
+/* --- Divers ------------------------------------------------------------ */
+.tn-phone-only { display: none; }
+html.tn-phone .tn-phone-only { display: inline-flex; }

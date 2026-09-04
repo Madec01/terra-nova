@@ -10,7 +10,9 @@
     "preview": "vite preview --port 4173",
     "test": "node --test tests/*.test.js",
     "smoke": "node tools/smoke.mjs",
-    "smoke:shot": "node tools/smoke.mjs --shot"
+    "smoke:shot": "node tools/smoke.mjs --shot",
+    "boot": "node tools/boot-check.mjs",
+    "mobile": "node tools/mobile-check.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"

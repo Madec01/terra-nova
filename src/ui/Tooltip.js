@@ -66,7 +66,9 @@ export class Tooltip {
     this._subs.push(on(this.root, 'click', (e) => {
       if (!this.tapEnabled) return;
       const t = e.target instanceof Element ? e.target.closest('[data-tip]') : null;
-      if (!t || this._attached.has(t)) return;
+      // Une commande garde son action : son infobulle ne fait que la nommer,
+      // et son nom accessible est déjà porté par `aria-label`.
+      if (!t || this._attached.has(t) || isControl(t)) return;
       this.toggleTap(t, () => t.getAttribute('data-tip'));
     }));
 
@@ -208,5 +210,11 @@ export class Tooltip {
 }
 
 const FOCUSABLE = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'];
+
+/** Un nœud qui a déjà une action propre : l'appui ne doit pas la voler. */
+function isControl(node) {
+  try { return node.matches('button, a, input, select, textarea, [role="button"], [role="radio"], [role="tab"]'); }
+  catch { return false; }
+}
 
 export default Tooltip;

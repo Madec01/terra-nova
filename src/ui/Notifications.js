@@ -8,6 +8,15 @@ import { el, on } from './dom.js';
 
 const LIFETIME = 6000;
 const MAX_VISIBLE = 5;
+/** Sur téléphone, la pile ne doit jamais avaler l'écran. */
+const MAX_VISIBLE_PHONE = 2;
+
+function maxVisible() {
+  return document.documentElement.classList.contains('tn-phone') ? MAX_VISIBLE_PHONE : MAX_VISIBLE;
+}
+function isTouch() {
+  return document.documentElement.classList.contains('tn-touch');
+}
 const DEFAULT_ICON = { info: '›', success: '✓', warn: '⚠', danger: '⚠' };
 
 export class Notifications {
@@ -44,7 +53,7 @@ export class Notifications {
       el('div', { class: 'tn-notif-body' },
         n.title ? el('div', { class: 'tn-notif-title', text: n.title }) : null,
         el('div', { class: 'tn-notif-text', text: n.text }),
-        hasRegion ? el('div', { class: 'tn-notif-hint', text: `Secteur ${n.regionId} — cliquer pour centrer` }) : null),
+        hasRegion ? el('div', { class: 'tn-notif-hint', text: `Secteur ${n.regionId} — ${isTouch() ? 'appuyer' : 'cliquer'} pour centrer` }) : null),
       el('button', {
         class: 'tn-notif-close', type: 'button', 'aria-label': 'Fermer la notification', text: '×',
       }));
@@ -72,7 +81,7 @@ export class Notifications {
     this.items.push(item);
     item.timer = setTimeout(close, LIFETIME);
 
-    while (this.items.length > MAX_VISIBLE) this.remove(this.items[0], true);
+    while (this.items.length > maxVisible()) this.remove(this.items[0], true);
 
     // Animation d'entrée (double rAF pour laisser le style initial s'appliquer).
     requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('is-in')));

@@ -38,6 +38,17 @@
   --tn-cut: 9px;
   --tn-tap: 28px;
 
+  /* Zones sûres : encoche, coins arrondis, barre de gestes iOS. */
+  --tn-safe-t: env(safe-area-inset-top, 0px);
+  --tn-safe-r: env(safe-area-inset-right, 0px);
+  --tn-safe-b: env(safe-area-inset-bottom, 0px);
+  --tn-safe-l: env(safe-area-inset-left, 0px);
+
+  /* Bas d'écran mobile : contrôles du temps + barre d'onglets. */
+  --tn-timerow-h: 46px;
+  --tn-tabbar-h: 56px;
+  --tn-bottom-h: 0px;
+
   --tn-fast: 130ms;
   --tn-slow: 200ms;
 
@@ -65,7 +76,14 @@ html, body {
   overscroll-behavior: none;
 }
 
-body { touch-action: none; }
+/* `touch-action: none` sur <body> interdirait TOUT défilement dans ses
+   descendants, y compris à l'intérieur des feuilles : la règle appartient au
+   canvas. `manipulation` suffit ici à supprimer le zoom par double-appui. */
+body {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
 
 /* Indispensable : nos composants posent `display: flex`, ce qui l'emporterait
    sur la règle `[hidden] { display: none }` du navigateur. */
@@ -88,7 +106,8 @@ canvas.tn-scene {
   width: 100%;
   height: 100%;
   z-index: 0;
-  touch-action: none;
+  touch-action: none;          /* la planète capte elle-même glisser et pincer */
+  overscroll-behavior: none;   /* pas de rebond de défilement sous le doigt */
 }
 
 /* --------------------------------------------------------------------- */
@@ -116,8 +135,11 @@ canvas.tn-scene {
 
 .tn-ui > * { pointer-events: auto; }
 
-/* Curseur de visée pendant le placement d'un bâtiment. */
-.tn-ui.is-placing { cursor: crosshair; }
+/* Curseur de visée pendant le placement : `.tn-ui` est en `pointer-events:
+   none`, la règle n'y servait à rien — c'est le canvas qui reçoit le pointeur. */
+.tn-ui.is-placing, .tn-ui.is-scanning { cursor: crosshair; }
+body:has(.tn-ui.is-placing) > canvas { cursor: crosshair; }
+body:has(.tn-ui.is-scanning) > canvas { cursor: cell; }
 
 /* --- typographie utilitaire ------------------------------------------- */
 
@@ -166,7 +188,7 @@ canvas.tn-scene {
   position: absolute;
   left: var(--tn-gap);
   top: calc(var(--tn-top-h) + var(--tn-gap));
-  bottom: 84px;
+  bottom: calc(84px + var(--tn-bottom-h));
   display: flex;
   align-items: flex-start;
   gap: var(--tn-gap);
@@ -187,7 +209,7 @@ canvas.tn-scene {
 
 .tn-center-stack {
   position: absolute;
-  bottom: 66px;
+  bottom: calc(66px + var(--tn-bottom-h));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -199,17 +221,22 @@ canvas.tn-scene {
 }
 .tn-center-stack > *:not([hidden]) { pointer-events: auto; }
 
-.tn-timebar {
+/* Conteneur du bas : contrôles du temps sur ordinateur, contrôles du temps
+   + barre d'onglets sur téléphone. Rien n'est déplacé dans le DOM. */
+.tn-bottom {
   position: absolute;
   bottom: var(--tn-gap);
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .tn-notifs {
   position: absolute;
   right: var(--tn-gap);
-  bottom: var(--tn-gap);
+  bottom: calc(var(--tn-gap) + var(--tn-bottom-h));
   width: 304px;
   max-width: calc(100vw - 2 * var(--tn-gap));
   display: flex;
@@ -220,11 +247,14 @@ canvas.tn-scene {
   z-index: 30;
 }
 .tn-notifs > * { pointer-events: auto; }
+/* La fiche de secteur porte « Construire ici » et les démolitions : les
+   bulles se décalent plutôt que de voler les clics (PLAYTEST C6). */
+.tn-ui.has-region .tn-notifs { right: calc(var(--tn-panel-w) + 2 * var(--tn-gap)); }
 
 .tn-debug {
   position: absolute;
   left: calc(var(--tn-rail) + 2 * var(--tn-gap));
-  bottom: 84px;
+  bottom: calc(84px + var(--tn-bottom-h));
   width: 320px;
   max-width: calc(100vw - 2 * var(--tn-gap));
   max-height: 60vh;
@@ -306,67 +336,255 @@ canvas.tn-scene {
   }
 }
 
-/* --------------------------------------------------------------------- */
-/*  Adaptatif — tablette et petits écrans                                */
-/* --------------------------------------------------------------------- */
+/* ===================================================================== */
+/*  ADAPTATIF                                                            */
+/*                                                                       */
+/*  Trois régimes, et un seul critère de bascule vers le mobile :         */
+/*  la TAILLE ET le POINTEUR. Une fenêtre étroite sur ordinateur garde le */
+/*  survol et la disposition de bureau ; un téléphone bascule, même large */
+/*  en paysage. Les classes `tn-touch` / `tn-phone` sont posées par       */
+/*  UIManager sur <html> (matchMedia + redimensionnement).                */
+/* ===================================================================== */
 
-@media (max-width: 1100px), (pointer: coarse) {
-  :root {
-    --tn-rail: 52px;
-    --tn-panel-w: 280px;
-    --tn-tap: 40px;
-  }
+/* --- 1. Barre supérieure : de 360 px à 2560 px, sans troncature ------- */
+/* À 1280 px la barre réclamait 1356 px et coupait la stabilité (I2). Les
+   cellules se resserrent, et si tout ne rentre toujours pas elles défilent
+   au lieu de disparaître sous le bord. */
+.tn-res, .tn-ind { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tn-res::-webkit-scrollbar, .tn-ind::-webkit-scrollbar { height: 0; }
 
-  /* Barre d'outils : icônes seules. */
-  .tn-tool-label { display: none; }
-  .tn-tool { width: var(--tn-rail); height: var(--tn-rail); }
-
-  .tn-btn, .tn-speed, .tn-icon-btn, .tn-layer, .tn-choice {
-    min-height: var(--tn-tap);
-  }
-  .tn-icon-btn { min-width: var(--tn-tap); }
-
-  .tn-res-cell { padding: 4px 6px; }
-  .tn-ind-cell { min-width: 74px; }
+@media (max-width: 1440px) {
+  .tn-res-cell { min-width: 104px; padding: 5px 8px; }
+  .tn-ind-cell { min-width: 76px; padding: 4px 8px; }
 }
 
-@media (max-width: 900px) {
-  .tn-topbar {
-    flex-direction: column;
-    gap: 4px;
-    padding-bottom: 8px;
-  }
+/* Sous 1100 px, deux rangées : ressources puis indicateurs. */
+@media (max-width: 1100px) {
   :root { --tn-top-h: 88px; }
-  .tn-res, .tn-ind { overflow-x: auto; }
+  .tn-topbar { flex-direction: column; gap: 2px; padding-bottom: 8px; }
+  .tn-res-cell { min-width: 96px; }
+  .tn-ind-cell { min-width: 72px; }
 }
 
-@media (max-width: 700px) {
-  :root { --tn-panel-w: min(300px, calc(100vw - var(--tn-rail) - 3 * var(--tn-gap))); }
-
-  /* Le panneau de région devient une feuille glissant depuis le bas. */
-  .tn-region {
-    left: 0; right: 0; bottom: 0;
-    top: auto;
-    width: auto;
-    max-height: 56vh;
-    border-left: 0; border-right: 0; border-bottom: 0;
-    animation: tn-slide-in var(--tn-slow) ease;
-    z-index: 35;
-  }
-  .tn-region.is-collapsed .tn-panel-body { display: none; }
-  .tn-region .tn-collapse { display: inline-flex; }
-
-  .tn-left { bottom: 96px; }
-  .tn-dock { max-height: calc(100vh - var(--tn-top-h) - 180px); }
-  .tn-notifs { left: var(--tn-gap); right: var(--tn-gap); width: auto; bottom: 60vh; }
-  .tn-center-stack { bottom: 60px; }
-  .tn-timebar { bottom: 4px; }
-  .tn-debug { left: var(--tn-gap); right: var(--tn-gap); width: auto; bottom: 60vh; }
+@media (max-width: 820px) {
+  :root { --tn-panel-w: 264px; }
 }
 
-/* Le bouton de repli n'est utile qu'en mode feuille. */
-.tn-region .tn-collapse { display: none; }
-@media (max-width: 1100px), (pointer: coarse) {
-  .tn-region .tn-collapse { display: inline-flex; }
-  .tn-region.is-collapsed .tn-panel-body { display: none; }
+/* --- 2. Pointeur grossier : cibles de 44 px, libellés visibles -------- */
+html.tn-touch { --tn-tap: 44px; }
+
+html.tn-touch .tn-btn,
+html.tn-touch .tn-speed,
+html.tn-touch .tn-layer,
+html.tn-touch .tn-choice,
+html.tn-touch .tn-card,
+html.tn-touch .tn-tech,
+html.tn-touch .tn-slot,
+html.tn-touch .tn-input,
+html.tn-touch .tn-tool,
+html.tn-touch .tn-res-cell,
+html.tn-touch .tn-ind-cell,
+html.tn-touch .tn-victory .tn-row,
+html.tn-touch .tn-notif-close {
+  min-height: var(--tn-tap);
 }
+html.tn-touch .tn-icon-btn,
+html.tn-touch .tn-notif-close {
+  min-width: var(--tn-tap);
+  height: var(--tn-tap);
+}
+html.tn-touch .tn-btn--small { min-height: var(--tn-tap); padding: 4px 12px; }
+html.tn-touch .tn-speed { min-width: var(--tn-tap); }
+html.tn-touch .tn-victory .tn-row { align-items: center; }
+html.tn-touch .tn-ind-cell { cursor: pointer; }
+html.tn-touch .tn-res-cell { cursor: pointer; }
+
+/* Sans survol, une icône seule ne se devine pas : le rail garde ses mots. */
+html.tn-touch .tn-tool { width: auto; min-width: 60px; padding: 0 6px; }
+html.tn-touch .tn-tool-label { display: block; font-size: 8px; }
+
+/* Le bouton « ⓘ » n'existe qu'au doigt : à la souris, le survol suffit. */
+.tn-card-info { display: none; }
+html.tn-touch .tn-card-info { display: inline-flex; }
+
+/* --- 3. Téléphone : grammaire d'application mobile -------------------- */
+html.tn-phone {
+  --tn-top-h: calc(96px + var(--tn-safe-t));
+  --tn-bottom-h: calc(var(--tn-timerow-h) + var(--tn-tabbar-h) + var(--tn-safe-b));
+  --tn-gap: 8px;
+}
+
+/* Barre du haut : deux rangées compactes, jamais tronquées. */
+html.tn-phone .tn-topbar {
+  flex-direction: column;
+  gap: 2px;
+  padding: calc(4px + var(--tn-safe-t)) calc(6px + var(--tn-safe-r)) 4px calc(6px + var(--tn-safe-l));
+  min-height: 0;
+}
+html.tn-phone .tn-res,
+html.tn-phone .tn-ind {
+  display: grid;
+  gap: 2px;
+  overflow: visible;
+}
+html.tn-phone .tn-res { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+html.tn-phone .tn-ind { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+
+html.tn-phone .tn-res-cell {
+  min-width: 0;
+  height: 44px;
+  gap: 4px;
+  padding: 0 2px;
+  justify-content: center;
+  border-left: 0;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--tn-line);
+}
+html.tn-phone .tn-res-cell .tn-bar,
+html.tn-phone .tn-res-flux { display: none; }
+html.tn-phone .tn-res-main { flex: 0 1 auto; }
+html.tn-phone .tn-res-icon { font-size: 12px; }
+html.tn-phone .tn-res-value { font-size: 12px; }
+
+html.tn-phone .tn-ind-cell {
+  min-width: 0;
+  height: 46px;
+  padding: 2px 1px;
+  gap: 1px;
+  align-items: center;
+  border-left: 0;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--tn-line);
+}
+html.tn-phone .tn-ind-trend { display: none; }
+html.tn-phone .tn-ind-label { font-size: 8px; letter-spacing: 0.06em; }
+html.tn-phone .tn-ind-value { font-size: 10px; letter-spacing: -0.02em; }
+html.tn-phone .tn-ind-main { min-width: 0; }
+
+/* Le rail vertical disparaît au profit de la barre d'onglets. */
+html.tn-phone .tn-toolbar { display: none; }
+
+/* Feuilles : panneau d'onglet et fiche de secteur, ancrées au-dessus des
+   onglets, une seule ouverte à la fois. */
+html.tn-phone .tn-left {
+  position: fixed;
+  left: 0; right: 0; top: auto;
+  bottom: var(--tn-bottom-h);
+  display: block;
+  max-width: none;
+  z-index: 36;
+}
+html.tn-phone .tn-dock {
+  width: auto;
+  max-height: min(64vh, calc(100vh - var(--tn-top-h) - var(--tn-bottom-h) - 8px));
+  border-left: 0; border-right: 0; border-bottom: 0;
+}
+html.tn-phone .tn-region {
+  position: fixed;
+  left: 0; right: 0; top: auto;
+  bottom: var(--tn-bottom-h);
+  width: auto;
+  max-height: min(64vh, calc(100vh - var(--tn-top-h) - var(--tn-bottom-h) - 8px));
+  border-left: 0; border-right: 0; border-bottom: 0;
+  z-index: 35;
+}
+html.tn-phone .tn-region.is-peek .tn-region-details { display: none; }
+html.tn-phone .tn-region.is-peek .tn-panel-body { overflow: hidden; }
+
+/* Bas d'écran : temps puis onglets, dans la zone sûre. */
+html.tn-phone .tn-bottom {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  transform: none;
+  align-items: stretch;
+  padding: 0 var(--tn-safe-r) var(--tn-safe-b) var(--tn-safe-l);
+  background: rgba(8, 11, 17, 0.94);
+  border-top: 1px solid var(--tn-line-2);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 45;
+}
+/* Bandeau de mode et amorce : en HAUT sur téléphone. En bas ils se seraient
+   trouvés derrière la feuille de secteur, qui occupe cette place. */
+html.tn-phone .tn-center-stack {
+  top: calc(var(--tn-top-h) + 6px);
+  bottom: auto;
+  max-width: calc(100vw - 16px);
+  width: calc(100vw - 16px);
+  z-index: 44;
+}
+html.tn-phone .tn-banner,
+html.tn-phone .tn-hintbar { width: 100%; }
+html.tn-phone .tn-notifs {
+  left: 8px; right: 8px; width: auto;
+  top: calc(var(--tn-top-h) + 6px);
+  bottom: auto;
+  justify-content: flex-start;
+}
+/* Quand un bandeau de mode occupe le haut, les bulles se rangent dessous. */
+html.tn-phone .tn-ui.is-placing .tn-notifs,
+html.tn-phone .tn-ui.is-scanning .tn-notifs { top: calc(var(--tn-top-h) + 52px); }
+html.tn-phone .tn-debug {
+  left: 6px; right: 6px; width: auto;
+  bottom: calc(var(--tn-bottom-h) + 6px);
+  max-height: 50vh;
+}
+html.tn-phone .tn-tooltip { max-width: none; }
+
+/* --- 4. Téléphone en paysage : la hauteur manque, les panneaux passent  */
+/*        sur les côtés et le bas se met sur une seule rangée.            */
+html.tn-phone-land {
+  --tn-top-h: calc(50px + var(--tn-safe-t));
+  --tn-bottom-h: calc(56px + var(--tn-safe-b));
+}
+html.tn-phone-land .tn-topbar { flex-direction: row; align-items: center; gap: 6px; }
+html.tn-phone-land .tn-res { grid-template-columns: repeat(5, minmax(64px, 1fr)); flex: 1 1 auto; }
+html.tn-phone-land .tn-ind { grid-template-columns: repeat(6, minmax(58px, 1fr)); flex: 1 1 auto; }
+html.tn-phone-land .tn-res-cell,
+html.tn-phone-land .tn-ind-cell { height: 44px; }
+
+html.tn-phone-land .tn-bottom { flex-direction: row; align-items: center; }
+html.tn-phone-land .tn-timebar { flex: 1 1 auto; }
+html.tn-phone-land .tn-tabbar { flex: 0 0 auto; height: 56px; }
+html.tn-phone-land .tn-tab { min-width: 68px; }
+
+html.tn-phone-land .tn-left {
+  left: auto;
+  right: var(--tn-safe-r);
+  width: min(340px, 52vw);
+  top: calc(var(--tn-top-h) + 4px);
+  bottom: calc(var(--tn-bottom-h) + 4px);
+}
+html.tn-phone-land .tn-dock { max-height: 100%; height: 100%; }
+html.tn-phone-land .tn-region {
+  right: auto;
+  left: var(--tn-safe-l);
+  width: min(320px, 50vw);
+  top: calc(var(--tn-top-h) + 4px);
+  bottom: calc(var(--tn-bottom-h) + 4px);
+  max-height: none;
+}
+/* En paysage, la hauteur est disponible : la fiche n'est plus « réduite ». */
+html.tn-phone-land .tn-region.is-peek .tn-region-details { display: block; }
+html.tn-phone-land .tn-region.is-peek .tn-panel-body { overflow-y: auto; }
+html.tn-phone-land .tn-sheet-grab { display: none; }
+html.tn-phone-land .tn-notifs { left: auto; right: 8px; width: 300px; }
+
+/* --- 5. Zones sûres sur les surfaces plein écran ---------------------- */
+html.tn-phone .tn-overlay {
+  padding: calc(12px + var(--tn-safe-t)) calc(8px + var(--tn-safe-r))
+           calc(12px + var(--tn-safe-b)) calc(8px + var(--tn-safe-l));
+}
+html.tn-phone .tn-menu-panel {
+  max-height: none;
+  padding: 16px 14px;
+  clip-path: none;
+}
+/* Sur téléphone, les deux actions décisives passent AVANT les réglages :
+   « Nouvelle partie » ne doit pas exiger de faire défiler l'écran d'accueil. */
+html.tn-phone .tn-menu .tn-menu-panel { display: flex; flex-direction: column; }
+html.tn-phone .tn-menu .tn-menu-panel > .tn-menu-brand { order: -3; }
+html.tn-phone .tn-menu .tn-menu-panel > .tn-btn:not(.tn-btn--primary) { order: -2; }
+html.tn-phone .tn-menu .tn-menu-panel > .tn-btn--primary { order: -1; }
+html.tn-phone .tn-menu-title { font-size: 20px; letter-spacing: 0.2em; }
+html.tn-phone .tn-menu-lore { font-size: 11px; margin: 10px 0 4px; }

@@ -39,7 +39,28 @@ const PLAN = [
 ];
 
 /** Fourchette de température visée par le joueur automatique (°C). */
-const TARGET_T = { low: 4, high: 22, panic: 27 };
+const TARGET_T = { low: 4, high: 20, panic: 24 };
+
+/**
+ * Le joueur automatique n'explore plus TOUTE la planète : un scan révèle une
+ * zone entière, et les plafonds de bâtiments sont serrés. Il cartographie donc
+ * ce dont il a besoin (une bonne moitié du globe pour avoir le choix des
+ * sites), en visant en priorité les anomalies et les zones minéralisées, puis
+ * il laisse l'exploration automatique finir le travail.
+ */
+const EXPLORE_TARGET_RATIO = 0.55;
+
+/**
+ * Plafonds que s'impose le joueur automatique, type par type. Ils suivent les
+ * `maxTotal` de buildings.js : le but est une partie gagnée en 60 à 90
+ * bâtiments, pas en 265.
+ */
+const WANT = {
+  mine: 6, refinery: 3, depot: 3, solar: 6, geothermal: 5, fusion: 3,
+  science_station: 5, ice_extractor: 6, ghg_factory: 6, atmo_processor: 7,
+  o2_generator: 6, polar_melter: 4, orbital_mirror: 8, climate_stabilizer: 3,
+  biodome: 6, seeder: 5, colony: 6,
+};
 
 /**
  * Joue une partie et retourne son historique + son verdict.
@@ -77,41 +98,86 @@ function playGame(seed, years, reckless = false) {
     return done;
   }
 
+  /** Fraction du globe déjà cartographiée. */
+  function discoveredRatio() {
+    let n = 0;
+    for (let i = 0; i < R.count; i++) if (R.discovered[i]) n++;
+    return n / R.count;
+  }
+
+  /**
+   * Reconnaissance : on remplit la file de scans avec les meilleures cibles
+   * inconnues encore accrochées au territoire connu (anomalie > minerai >
+   * géothermie), et on s'arrête dès qu'on en sait assez.
+   */
+  function explore() {
+    const ex = S.explore;
+    if (discoveredRatio() >= EXPLORE_TARGET_RATIO) return;
+    if (ex.queue.length + ex.scanning.length >= 3) return;
+
+    let best = -1, bestScore = -1;
+    for (let i = 0; i < R.count; i++) {
+      if (R.discovered[i]) continue;
+      const neigh = R.neighbors(i);
+      let known = 0;
+      for (let j = 0; j < neigh.length; j++) if (R.discovered[neigh[j]]) known++;
+      if (!known) continue;                       // on n'explore pas au hasard
+      const score = known * 0.5 + R.anomaly[i] * 4 + R.minerals[i] * 2 + R.geothermal[i];
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    if (best >= 0) game.scanRegion(best);
+  }
+
   /* Le joueur agit une fois tous les 20 jours. */
   function play() {
     const g = S.globals;
 
-    // Exploration continue.
-    for (let i = 0; i < R.count; i++) {
-      if (!R.discovered[i] && S.explore.scanning.length < 4) game.scanRegion(i);
+    explore();
+    // Recherche PROGRESSIVE : on ne peut en mener qu'une à la fois, on
+    // enchaîne donc le plan dès que le laboratoire se libère.
+    if (!S.tech.current) {
+      for (const id of PLAN) if (game.canResearch(id).ok) { game.startResearch(id); break; }
     }
-    // Recherche dès que la science le permet.
-    for (const id of PLAN) if (game.canResearch(id).ok) { game.startResearch(id); break; }
 
     // Infrastructure de base, dimensionnée sur la demande.
+    // L'énergie est devenue réellement rare : on garde une marge confortable
+    // et on empile les sources dès qu'elle se réduit.
     const netEnergy = S.power.production - S.power.consumption;
-    if (netEnergy < 14) {
+    if (netEnergy < 30) {
       if (!tryBuildMany('fusion', 1, () => 1)) {
         if (!tryBuildMany('geothermal', 1, (i) => R.geothermal[i])) {
-          tryBuildMany('solar', 2, (i) => 1 - Math.abs(R.latitude[i]));
+          tryBuildMany('solar', 1, (i) => 1 - Math.abs(R.latitude[i]));
         }
       }
     }
-    if (count('mine') < 16) tryBuildMany('mine', 1, (i) => R.minerals[i]);
-    if (count('science_station') < 12) tryBuildMany('science_station', 1, (i) => R.anomaly[i] * 2 + R.radiation[i]);
-    if (count('depot') < 5) tryBuildMany('depot', 1, (i) => -i);
+    if (count('mine') < WANT.mine) tryBuildMany('mine', 1, (i) => R.minerals[i]);
+    if (count('science_station') < WANT.science_station) tryBuildMany('science_station', 1, (i) => R.anomaly[i] * 2 + R.radiation[i]);
+    // Sans dépôt, le stock de matériaux plafonne trop bas pour épargner une
+    // mégastructure : c'est désormais un investissement prioritaire.
+    if (count('depot') < WANT.depot) tryBuildMany('depot', 1, (i) => -i);
     // L'eau se gère à la demande : on ouvre une station dès que le bilan
     // hydrique se dégrade (c'est exactement ce que fait un joueur attentif).
     const waterScore = (i) => R.ice[i] + R.water[i] / BALANCE.water.basinDepth + R.moisture[i];
-    if (count('ice_extractor') < 16 && (S.flux.water <= 0.5 || S.resources.water < 250)) {
+    if (count('ice_extractor') < WANT.ice_extractor && (S.flux.water <= 0.5 || S.resources.water < 150)) {
       tryBuildMany('ice_extractor', 1, waterScore);
     }
-    if (count('refinery') < 5) tryBuildMany('refinery', 1, (i) => R.minerals[i]);
+    // La raffinerie vaut d'autant plus qu'elle est entourée de mines.
+    if (count('refinery') < WANT.refinery) {
+      tryBuildMany('refinery', 1, (i) => {
+        let n = 0;
+        const neigh = R.neighbors(i);
+        for (const b of S.buildings) if (b.type === 'mine' && (b.region === i || neigh.includes(b.region))) n++;
+        return n * 2 + R.minerals[i];
+      });
+    }
 
     /* --- JOUEUR IMPRUDENT : mode `--bad` -------------------------------
        Il empile TOUT ce qui réchauffe, tout de suite, et ne démonte jamais.
        C'est la démonstration que la partie est perdable — et pourquoi. */
     if (reckless) {
+      // Il explore à l'aveugle, sans jamais viser : la file se remplit toute
+      // seule et il ne regarde ni anomalies ni gisements.
+      game.setAutoExplore(true);
       tryBuildMany('ghg_factory', 2, (i) => 1 - R.pollution[i]);
       tryBuildMany('polar_melter', 2, (i) => R.ice[i]);
       tryBuildMany('orbital_mirror', 2, (i) => -i);
@@ -126,9 +192,9 @@ function playGame(seed, years, reckless = false) {
     /* --- THERMOSTAT ---------------------------------------------------- */
     // Trop froid : on empile les leviers de chauffage.
     if (g.temperature < TARGET_T.low) {
-      if (count('ghg_factory') < 12) tryBuildMany('ghg_factory', 1, (i) => 1 - R.pollution[i]);
-      if (count('polar_melter') < 8) tryBuildMany('polar_melter', 1, (i) => R.ice[i]);
-      if (count('orbital_mirror') < 8 && g.temperature < TARGET_T.low - 2) {
+      if (count('ghg_factory') < WANT.ghg_factory) tryBuildMany('ghg_factory', 1, (i) => 1 - R.pollution[i]);
+      if (count('polar_melter') < WANT.polar_melter) tryBuildMany('polar_melter', 1, (i) => R.ice[i]);
+      if (count('orbital_mirror') < WANT.orbital_mirror && g.temperature < TARGET_T.low - 2) {
         tryBuildMany('orbital_mirror', 1, (i) => -i);
       }
     }
@@ -145,30 +211,30 @@ function playGame(seed, years, reckless = false) {
     }
 
     /* --- PRESSION ------------------------------------------------------- */
-    if (g.pressure < 82 && count('atmo_processor') < 14) {
+    if (g.pressure < 88 && count('atmo_processor') < WANT.atmo_processor) {
       tryBuildMany('atmo_processor', 1, (i) => R.geothermal[i]);
     }
 
     /* --- OXYGÈNE : après la biosphère, et sans assécher tout le CO₂ ----- */
-    if (g.pressure > 30 && g.oxygen < 19 && g.co2 > 12 && count('o2_generator') < 12) {
+    if (g.pressure > 30 && g.oxygen < 24 && g.co2 > 12 && count('o2_generator') < WANT.o2_generator) {
       tryBuildMany('o2_generator', 1, (i) => -i);
     }
     // Le craquage a mangé trop de CO₂ : on lève le pied (sinon la planète gèle).
     if (g.co2 < 7 && count('o2_generator') > 0) demolishSome('o2_generator', 2);
 
     /* --- BIOSPHÈRE ------------------------------------------------------ */
-    if (g.temperature > -22 && count('biodome') < 12) {
+    if (g.temperature > -22 && count('biodome') < WANT.biodome) {
       tryBuildMany('biodome', 1, (i) => R.habitability[i] * 2 + R.moisture[i]);
     }
-    if (g.biomass > 3 && count('seeder') < 10) tryBuildMany('seeder', 1, (i) => R.vegetation[i]);
+    if (g.biomass > 3 && count('seeder') < WANT.seeder) tryBuildMany('seeder', 1, (i) => R.vegetation[i]);
 
     /* --- STABILITÉ & COLONIES ------------------------------------------- */
-    if (g.stability < 78 && count('climate_stabilizer') < 5) {
+    if (g.stability < 90 && count('climate_stabilizer') < WANT.climate_stabilizer) {
       tryBuildMany('climate_stabilizer', 1, (i) => -i);
     }
     // Une colonie se pose au bord de l'eau et sur du vert : c'est là qu'elle
     // se nourrit et s'abreuve toute seule.
-    if (count('colony') < 8) {
+    if (count('colony') < WANT.colony) {
       tryBuildMany('colony', 1, (i) => R.habitability[i] * 2 + R.vegetation[i]
         + Math.min(1, R.water[i] / BALANCE.water.basinDepth + R.moisture[i]));
     }
@@ -177,11 +243,26 @@ function playGame(seed, years, reckless = false) {
   const days = years * 365;
   const marks = [];
   let victoryDay = null;
+  /* Compteurs de DENSITÉ D'ACTION, relevés à l'instant exact de la victoire :
+     c'est le nombre de gestes qu'a coûté la partie, la mesure que le test de
+     jouabilité réclame (cible : < 80 scans, 60 à 90 bâtiments). */
+  let atVictory = null;
   let maxT = -Infinity, minStab = Infinity, maxP = 0;
+  /* PRESSION ÉCONOMIQUE — le rapport de jouabilité mesurait un stock de
+     matériaux plein 92 % des jours et une énergie contrainte 2 % du temps :
+     l'économie ne contraignait rien. On relève désormais les deux. */
+  let daysFullMat = 0, daysTightPower = 0, daysCounted = 0;
   for (let d = 0; d < days; d++) {
     game._tick(1, d);
     if (d % 20 === 0) play();
     const g = S.globals;
+    // On ne mesure que la partie RÉELLEMENT jouée : après la victoire, plus
+    // rien n'est construit, le stock se remplit et la mesure n'a plus de sens.
+    if (!S.progress.victory) {
+      daysCounted++;
+      if (S.capacity.materials > 0 && S.resources.materials >= S.capacity.materials - 1e-6) daysFullMat++;
+      if ((S.power.satisfaction ?? 1) < 0.95) daysTightPower++;
+    }
     if (g.temperature > maxT) maxT = g.temperature;
     if (g.stability < minStab) minStab = g.stability;
     if (g.pressure > maxP) maxP = g.pressure;
@@ -194,9 +275,24 @@ function playGame(seed, years, reckless = false) {
         mir: S.buildings.filter((b) => b.type === 'orbital_mirror').length,
       });
     }
-    if (S.progress.victory && victoryDay === null) victoryDay = d;
+    if (S.progress.victory && victoryDay === null) {
+      victoryDay = d;
+      let discovered = 0;
+      for (let i = 0; i < R.count; i++) if (R.discovered[i]) discovered++;
+      atVictory = {
+        buildings: S.buildings.length,
+        built: S.stats.built,
+        scans: S.stats.scansLaunched || 0,
+        discovered,
+        tech: S.tech.unlocked.length,
+      };
+    }
   }
-  return { game, state: S, regions: R, marks, victoryDay, maxT, minStab, maxP };
+  const economy = {
+    fullMaterials: daysCounted ? daysFullMat / daysCounted : 0,
+    tightPower: daysCounted ? daysTightPower / daysCounted : 0,
+  };
+  return { game, state: S, regions: R, marks, victoryDay, atVictory, maxT, minStab, maxP, economy };
 }
 
 /* ===================================================================== */
@@ -240,8 +336,16 @@ function printOne(seed, years, reckless = false) {
     console.log(`   ${r.ok ? '✔' : '·'} ${String(r.label).padEnd(34)} ${String(Number(r.value).toFixed(2)).padStart(10)}   cible ${r.target}`);
   }
   console.log(`\n  Victoire : ${victoryDay !== null ? `an ${(victoryDay / 365).toFixed(1)}` : 'non atteinte'}`);
+  if (run.atVictory) {
+    const a = run.atVictory;
+    console.log(`  À LA VICTOIRE — bâtiments : ${a.buildings} (posés : ${a.built}) · scans lancés : ${a.scans}`
+      + ` · secteurs connus : ${a.discovered}/${R.count} · technologies : ${a.tech}/${TECH_LIST.length}`);
+  }
   console.log(`  Pic de température : ${run.maxT.toFixed(1)} °C · creux de stabilité : ${run.minStab.toFixed(1)} · pic de pression : ${run.maxP.toFixed(1)} kPa`);
-  console.log(`  Technologies : ${S.tech.unlocked.length}/${TECH_LIST.length} · bâtiments : ${S.buildings.length} · événements : ${S.stats.events}`);
+  console.log(`  Pression économique — stock de matériaux plein : ${(run.economy.fullMaterials * 100).toFixed(0)} % des jours`
+    + ` · énergie contrainte (< 95 %) : ${(run.economy.tightPower * 100).toFixed(0)} % des jours`);
+  console.log(`  Technologies : ${S.tech.unlocked.length}/${TECH_LIST.length} · bâtiments : ${S.buildings.length}`
+    + ` · posés : ${S.stats.built} · scans : ${S.stats.scansLaunched || 0} · événements : ${S.stats.events}`);
   const problems = audit(run);
   console.log(problems.length ? `  ⚠ ANOMALIES : ${problems.join(' · ')}` : '  ✔ Aucune anomalie détectée.');
   console.log();
@@ -250,9 +354,11 @@ function printOne(seed, years, reckless = false) {
 
 function printMulti(n, years, reckless = false) {
   console.log(`\nSONDE MULTI-SEEDS — ${n} seeds, ${years} ans\n`);
-  console.log('     seed   victoire     T°C     kPa     O2%    CO2%    eau%     bio    stab      pop  picT anomalies');
-  console.log('  ' + '─'.repeat(112));
-  let wins = 0, inWindow = 0;
+  console.log('     seed   victoire     T°C     kPa     O2%    CO2%    eau%     bio    stab      pop  picT  bât scans anomalies');
+  console.log('  ' + '─'.repeat(124));
+  let wins = 0, inWindow = 0, inDensity = 0;
+  const dens = [];
+  const eco = [];
   for (let k = 0; k < n; k++) {
     const seed = 1000 + k * 7919;
     const run = playGame(seed, years, reckless);
@@ -262,9 +368,24 @@ function printMulti(n, years, reckless = false) {
     const year = v !== null ? v / 365 : null;
     if (year !== null && year >= 20 && year <= 45) inWindow++;
     const problems = audit(run);
-    console.log(`  ${String(seed).padStart(7)} ${(year !== null ? `an ${year.toFixed(1)}` : '—').padStart(10)} ${f(g.temperature)} ${f(g.pressure)} ${f(g.oxygen, 2)} ${f(g.co2, 1)} ${f(g.waterCoverage * 100, 1)} ${f(g.biomass, 1)} ${f(g.stability)} ${String(Math.round(g.population)).padStart(8)} ${f(run.maxT, 0)}  ${problems.length ? '⚠ ' + problems.join(' · ') : 'ok'}`);
+    eco.push(run.economy);
+    const a = run.atVictory;
+    if (a) {
+      dens.push(a);
+      if (a.buildings >= 60 && a.buildings <= 90 && a.scans < 80) inDensity++;
+    }
+    const bat = a ? String(a.buildings).padStart(4) : '   —';
+    const sc = a ? String(a.scans).padStart(5) : '    —';
+    console.log(`  ${String(seed).padStart(7)} ${(year !== null ? `an ${year.toFixed(1)}` : '—').padStart(10)} ${f(g.temperature)} ${f(g.pressure)} ${f(g.oxygen, 2)} ${f(g.co2, 1)} ${f(g.waterCoverage * 100, 1)} ${f(g.biomass, 1)} ${f(g.stability)} ${String(Math.round(g.population)).padStart(8)} ${f(run.maxT, 0)} ${bat} ${sc} ${problems.length ? '⚠ ' + problems.join(' · ') : 'ok'}`);
   }
-  console.log(`\n  Victoires : ${wins}/${n} · dans la fenêtre an 20–45 : ${inWindow}/${n}\n`);
+  const avg = (k) => dens.length ? (dens.reduce((a, b) => a + b[k], 0) / dens.length).toFixed(1) : '—';
+  const avgEco = (k) => (eco.reduce((a, b) => a + b[k], 0) / Math.max(1, eco.length) * 100).toFixed(0);
+  console.log(`\n  Victoires : ${wins}/${n} · dans la fenêtre an 20–45 : ${inWindow}/${n}`
+    + ` · densité tenue (60–90 bât. et < 80 scans) : ${inDensity}/${n}`);
+  console.log(`  Moyennes à la victoire — bâtiments : ${avg('buildings')} · scans : ${avg('scans')}`
+    + ` · secteurs connus : ${avg('discovered')} · technologies : ${avg('tech')}`);
+  console.log(`  Pression économique — matériaux au plafond : ${avgEco('fullMaterials')} % des jours`
+    + ` · énergie contrainte : ${avgEco('tightPower')} % des jours\n`);
 }
 
 const arg0 = process.argv[2];

@@ -357,40 +357,107 @@ export class Game {
   /*  FAÇADE — RECHERCHE & EXPLORATION                                   */
   /* =================================================================== */
 
+  /**
+   * RECHERCHE PROGRESSIVE — `canResearch` ne regarde PLUS le stock de science :
+   * on ne « paye » plus une technologie, on s'y engage. Ne restent donc que
+   * deux refus possibles : les prérequis manquants et le laboratoire déjà
+   * occupé (une seule recherche à la fois, c'est là qu'est l'arbitrage).
+   */
   canResearch(techId) {
     const t = TECHNOLOGIES[techId];
     const s = this.state;
     if (!t) return { ok: false, reason: 'Technologie inconnue.' };
     if (s.tech.unlocked.includes(techId)) return { ok: false, reason: 'Déjà acquise.' };
+    if (s.tech.current === techId) return { ok: false, reason: 'Recherche déjà en cours.' };
+    if (s.tech.current) {
+      const cur = TECHNOLOGIES[s.tech.current]?.name ?? s.tech.current;
+      return { ok: false, reason: `Laboratoire occupé : ${cur}. Abandonnez la recherche en cours d’abord.` };
+    }
     const missing = (t.requires || []).filter((r) => !s.tech.unlocked.includes(r));
     if (missing.length) {
       return { ok: false, reason: 'Prérequis : ' + missing.map((m) => TECHNOLOGIES[m]?.name ?? m).join(', ') };
     }
-    const cost = t.cost * BALANCE.research.costScale;
-    if (s.resources.science < cost) {
-      return { ok: false, reason: `Science insuffisante (${Math.floor(s.resources.science)} / ${Math.round(cost)}).` };
-    }
     return { ok: true };
   }
 
+  /** Engage le laboratoire sur une technologie. La progression se fait au tick. */
   startResearch(techId) {
     const check = this.canResearch(techId);
     if (!check.ok) { this.bus.emit('notify', { text: check.reason, kind: 'warn', icon: '⚠' }); return false; }
     const t = TECHNOLOGIES[techId];
-    this.state.resources.science -= t.cost * BALANCE.research.costScale;
-    this.state.tech.unlocked.push(techId);
-    this.state.stats.researched++;
-    this._refreshTechEffects();
-    pushLog(this.state, `Technologie acquise : ${t.name}.`, 'success', '⌬');
-    this.bus.emit('research:completed', { techId });
-    this.bus.emit('notify', { text: `Recherche terminée : ${t.name}`, kind: 'success', icon: '⌬' });
+    this.state.tech.current = techId;
+    this.state.tech.progress = 0;
+    pushLog(this.state, `Recherche engagée : ${t.name}.`, 'info', '⌬');
+    this.bus.emit('research:started', { techId });
+    this.bus.emit('notify', { text: `Recherche engagée : ${t.name}`, kind: 'info', icon: '⌬' });
     return true;
   }
 
+  /** Abandonne la recherche en cours. La moitié des points investis est rendue. */
+  cancelResearch() {
+    const s = this.state;
+    const id = s.tech.current;
+    if (!id) return false;
+    const refund = (s.tech.progress || 0) * BALANCE.research.refund;
+    s.resources.science += refund;
+    s.tech.current = null;
+    s.tech.progress = 0;
+    const name = TECHNOLOGIES[id]?.name ?? id;
+    pushLog(this.state, `Recherche abandonnée : ${name} (+${Math.round(refund)} science).`, 'warn', '⌬');
+    this.bus.emit('notify', {
+      text: `Recherche abandonnée : ${name}. ${Math.round(refund)} science récupérée.`,
+      kind: 'warn', icon: '⌬',
+    });
+    return true;
+  }
+
+  /**
+   * Jours restants estimés. Sans argument (ou pour la techno en cours) tient
+   * compte des points déjà investis ; pour une autre techno, donne la durée
+   * complète au débit actuel. `null` si le débit est nul (aucune science).
+   */
+  researchEta(techId = null) {
+    const s = this.state;
+    const id = techId ?? s.tech.current;
+    const t = TECHNOLOGIES[id];
+    if (!t) return null;
+    const rate = this._researchSystem()?.rate() ?? 0;
+    if (!(rate > 0)) return null;
+    const done = (id === s.tech.current) ? (s.tech.progress || 0) : 0;
+    const left = Math.max(0, t.cost * BALANCE.research.costScale - done);
+    return left / rate;
+  }
+
+  _researchSystem() { return this.systems.find((x) => x instanceof ResearchSystem); }
+  _exploreSystem() { return this.systems.find((x) => x instanceof ExplorationSystem); }
+
+  /* ---- Exploration : file d'attente et pilotage automatique ------------ */
+
+  /** Lance le scan, ou MET EN FILE si aucune sonde n'est libre. */
   scanRegion(regionId) {
-    const sys = this.systems.find((s) => s instanceof ExplorationSystem);
+    const sys = this._exploreSystem();
     return sys ? sys.startScan(this.ctx, regionId) : false;
   }
+
+  /** Retire la région de la file, ou interrompt le scan en cours. */
+  cancelScan(regionId) {
+    const sys = this._exploreSystem();
+    return sys ? sys.cancelScan(this.ctx, regionId) : false;
+  }
+
+  /** Active/désactive l'exploration automatique (empile la frontière connue). */
+  setAutoExplore(v) {
+    const on = !!v;
+    if (!this.state) return on;
+    this.state.explore.autoExplore = on;
+    this.bus.emit('notify', {
+      text: on ? 'Exploration automatique activée.' : 'Exploration automatique désactivée.',
+      kind: 'info', icon: '⌖',
+    });
+    return on;
+  }
+
+  get autoExplore() { return !!(this.state && this.state.explore && this.state.explore.autoExplore); }
 
   /* =================================================================== */
   /*  FAÇADE — VICTOIRE                                                  */
@@ -442,6 +509,9 @@ export class Game {
       },
       unlockAllTech() {
         for (const id in TECHNOLOGIES) if (!g.state.tech.unlocked.includes(id)) g.state.tech.unlocked.push(id);
+        // La recherche en cours n'a plus d'objet une fois l'arbre entier acquis.
+        g.state.tech.current = null;
+        g.state.tech.progress = 0;
         g._refreshTechEffects();
         g.bus.emit('research:completed', { techId: null });
       },

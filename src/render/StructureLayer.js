@@ -26,11 +26,17 @@
  *  les bâtiments s'enfonceraient sur le bord du disque. Seul `orbital_mirror`
  *  est en orbite (voir TUNING.orbit).
  *
- *  ATTÉNUATION — au-delà de FADE_NEAR, les instances rétrécissent vers leur
- *  point d'ancrage et disparaissent à FADE_FAR : de loin on regarde une
- *  planète, pas une couronne de babioles. Le calcul est fait dans le shader de
- *  sommet (`cameraPosition` y est disponible), donc sans aucun coût CPU ni
- *  reconstruction de matrices.
+ *  ATTÉNUATION — deux effacements, tous deux calculés dans le shader de sommet
+ *  (`cameraPosition` y est disponible), donc sans un octet de travail CPU ni
+ *  la moindre reconstruction de matrice :
+ *    · en DISTANCE DE LA CAMÉRA AU BÂTIMENT, entre FADE_NEAR et FADE_FAR —
+ *      calé pour que le cadrage par défaut de SceneManager ne laisse plus un
+ *      seul bâtiment, sans effacer ceux que `focusRegion()` vient de viser ;
+ *    · au LIMBE, sur la couronne extérieure du disque (LIMB_FADE_*), où les
+ *      bâtiments vus par la tranche dépassaient de la silhouette et formaient
+ *      un liseré noir contre l'atmosphère.
+ *  Dans les deux cas on rétrécit vers le point d'ancrage : le bâtiment rentre
+ *  dans le sol, il ne clignote pas.
  *
  *  Les matrices ne sont reconstruites QUE lorsque la liste des bâtiments change
  *  (comparaison de signature) ou pour les quelques instances en cours
@@ -54,9 +60,38 @@ const MAX_ASPECT = 0.95;
 /** Enfoncement de la base dans le sol, en unités d'emprise. */
 const SINK = 0.05;
 
-/** Distances caméra (unités monde) entre lesquelles les bâtiments s'effacent. */
-const FADE_NEAR = 2.30;
-const FADE_FAR = 3.80;
+/**
+ * Distances entre lesquelles les bâtiments s'effacent — mesurées de la caméra
+ * AU BÂTIMENT, jamais au centre de la planète.
+ *
+ * La nuance décide de tout. `OrbitControls` place la caméra à `distance` de sa
+ * CIBLE, et `SceneManager.focusRegion()` met cette cible sur la cellule : la
+ * caméra se retrouve alors à ~2,8 du centre mais à 1,8 du bâtiment qu'on vient
+ * justement de demander à voir. Un seuil pris sur le centre les effaçait au
+ * moment précis où le joueur les regarde.
+ *
+ * Les deux contraintes à satisfaire, en distance AU BÂTIMENT :
+ *   · cadrage par défaut (`_fitDistance()` ≥ 3,06 du centre) → la cellule la
+ *     plus proche est à 2,06 : il ne doit plus rien rester ;
+ *   · `focusRegion()` (1,82 de la cellule visée) → le bâtiment doit se voir.
+ * D'où cette fenêtre serrée. Bénéfice secondaire : au limbe les cellules sont
+ * mécaniquement plus loin de la caméra que celles du centre, donc elles
+ * s'effacent les premières — l'atténuation travaille dans le bon sens.
+ */
+const FADE_NEAR = 1.75;
+const FADE_FAR = 2.05;
+
+/**
+ * Effacement de LIMBE. `facing` = cos de l'angle entre la verticale locale de
+ * la cellule et la direction de la caméra : 1 au point sous la caméra, 0 à
+ * l'horizon géométrique. Les bâtiments proches du bord du disque étaient vus
+ * par la tranche, dépassaient de la silhouette et formaient un liseré noir
+ * contre le limbe atmosphérique. On les efface donc sur la couronne extérieure
+ * — soit à peine les 8 derniers pour cent du rayon apparent, quelle que soit
+ * la distance de la caméra (le critère est angulaire, donc invariant).
+ */
+const LIMB_FADE_IN = 0.12;
+const LIMB_FADE_OUT = 0.40;
 
 /** Gonflement radial du limbe : doit reproduire uLimbBulge de la surface. */
 const LIMB_BULGE = 0.008;
@@ -88,7 +123,7 @@ const C = {
   canvas:  [0.150, 0.156, 0.163],   // membrane d'habitat : clair mais désaturé
   // Voile réfléchissante du miroir orbital : le SEUL matériau clair du jeu,
   // et il est en orbite, jamais posé sur le paysage.
-  foil:    [0.280, 0.292, 0.310],
+  foil:    [0.205, 0.216, 0.238],
 };
 
 /* -------------------------------------------------------------------------- */
@@ -229,6 +264,7 @@ const MODELS = {
     part(cyl(0.075, 0.075, 0.14, 6), C.hullLt, { y: 0.95 }),
     part(box(0.045, 0.045, 0.045), C.lamp, { y: 1.05, mask: 1 }),
     part(box(0.26, 0.15, 0.20), C.hull, { x: -0.28, y: 0.16 }),
+    part(box(0.21, 0.030, 0.02), C.lamp, { x: -0.28, z: 0.105, y: 0.19, mask: 1 }),
   ]),
 
   /** Raffinerie : deux cuves coiffées + torchère. Silhouette : cylindres. */
@@ -244,6 +280,7 @@ const MODELS = {
     part(cyl(0.055, 0.032, 0.09, 8), C.heat, { x: 0.24, z: -0.22, y: 1.02, mask: 1 }),
     part(box(0.56, 0.035, 0.06), C.steel, { y: 0.66 }),
     part(box(0.05, 0.045, 0.02), C.lamp, { x: -0.20, z: 0.19, y: 0.30, mask: 1 }),
+    part(torus(0.192, 0.017, 16), C.lamp, { x: -0.20, y: 0.30, rx: Math.PI / 2, mask: 1 }),
   ]),
 
   /** Dépôt : conteneurs empilés. Silhouette : boîtes basses et larges. */
@@ -270,7 +307,7 @@ const MODELS = {
     part(cyl(0.018, 0.018, 0.24, 5), C.steel, { z: 0.02, y: 0.12 }),
     part(cyl(0.018, 0.018, 0.24, 5), C.steel, { z: 0.32, y: 0.12 }),
     part(box(0.14, 0.13, 0.14), C.hull, { x: -0.34, y: 0.14 }),
-    part(box(0.05, 0.03, 0.02), C.lamp, { x: -0.34, z: 0.08, y: 0.16, mask: 1 }),
+    part(box(0.115, 0.026, 0.02), C.lamp, { x: -0.34, z: 0.075, y: 0.16, mask: 1 }),
   ]),
 
   /** Géothermie : cheminée trapue + anneau de captage rougeoyant. */
@@ -319,7 +356,7 @@ const MODELS = {
     part(cone(0.075, 0.22, 8), C.hullLt, { x: 0.36, y: 0.86, rz: 0.42 }),
     part(cyl(0.17, 0.19, 0.16, 10), C.hull, { x: -0.26, y: 0.24 }),
     part(cyl(0.155, 0.155, 0.05, 10), C.ice, { x: -0.26, y: 0.34 }),
-    part(box(0.05, 0.03, 0.02), C.lamp, { x: -0.02, z: 0.17, y: 0.20, mask: 1 }),
+    part(box(0.30, 0.028, 0.02), C.lamp, { x: 0.02, z: 0.165, y: 0.20, mask: 1 }),
   ]),
 
   /** Usine à gaz : bloc massif et trois cheminées décroissantes. */
@@ -341,6 +378,7 @@ const MODELS = {
     part(cyl(0.085, 0.145, 1.10, 12), C.hull, { y: 0.66 }),
     part(torus(0.135, 0.022, 14), C.steel, { y: 0.46, rx: Math.PI / 2 }),
     part(torus(0.120, 0.022, 14), C.steel, { y: 0.80, rx: Math.PI / 2 }),
+    part(torus(0.113, 0.015, 14), C.lamp, { y: 0.64, rx: Math.PI / 2, mask: 1 }),
     part(box(0.03, 0.90, 0.03), C.steel, { x: 0.15, y: 0.60 }),
     part(cyl(0.105, 0.088, 0.10, 12), C.glass, { y: 1.24, mask: 1 }),
     part(cone(0.095, 0.18, 12), C.hullLt, { y: 1.37 }),
@@ -358,7 +396,7 @@ const MODELS = {
     part(torus(0.262, 0.028, 18), C.hullLt, { y: 0.70, rx: Math.PI / 2 }),
     part(torus(0.262, 0.028, 18), C.steel, { y: 0.70, rz: Math.PI / 2 }),
     part(cyl(0.045, 0.045, 0.16, 6), C.steel, { y: 0.99 }),
-    part(box(0.035, 0.03, 0.02), C.lamp, { z: 0.26, y: 0.78, mask: 1 }),
+    part(torus(0.245, 0.016, 18), C.lamp, { y: 0.70, rx: Math.PI / 2, mask: 1 }),
   ]),
 
   /** Fonte polaire : grande parabole inclinée vers le sol. */
@@ -369,7 +407,7 @@ const MODELS = {
     part(cone(0.40, 0.24, 18), C.hullLt, { y: 0.62, rx: 0.62 }),
     part(torus(0.40, 0.018, 20), C.steel, { y: 0.735, rx: Math.PI / 2 + 0.62 }),
     part(cyl(0.05, 0.05, 0.05, 8), C.heat, { y: 0.55, z: -0.03, mask: 1 }),
-    part(box(0.03, 0.03, 0.02), C.lamp, { z: 0.14, y: 0.21, mask: 1 }),
+    part(box(0.19, 0.028, 0.02), C.lamp, { z: 0.145, y: 0.20, mask: 1 }),
   ]),
 
   /**
@@ -386,8 +424,8 @@ const MODELS = {
     part(box(0.030, 0.022, 1.20), C.hull, { y: -0.03 }),
     part(cyl(0.10, 0.10, 0.14, 8), C.dark, { y: -0.06 }),
     part(cyl(0.055, 0.055, 0.05, 8), C.glass, { y: -0.13, mask: 1 }),
-    part(box(0.07, 0.02, 0.02), C.lamp, { x: 0.56, y: -0.03, mask: 1 }),
-    part(box(0.07, 0.02, 0.02), C.lamp, { x: -0.56, y: -0.03, mask: 1 }),
+    part(box(0.16, 0.020, 0.02), C.lamp, { x: 0.54, y: -0.03, mask: 1 }),
+    part(box(0.16, 0.020, 0.02), C.lamp, { x: -0.54, y: -0.03, mask: 1 }),
   ]),
 
   /** Stabilisateur climatique : grand anneau VERTICAL. */
@@ -411,6 +449,7 @@ const MODELS = {
     part(torus(0.30, 0.010, 20), C.hullLt, { y: 0.31, rx: Math.PI / 2 }),
     part(box(0.16, 0.14, 0.18), C.hull, { z: 0.42, y: 0.07 }),
     part(box(0.09, 0.07, 0.02), C.lamp, { z: 0.52, y: 0.07, mask: 1 }),
+    part(torus(0.395, 0.013, 22), C.lamp, { y: 0.075, rx: Math.PI / 2, mask: 1 }),
   ]),
 
   /** Tour d'ensemencement : mât fin à bras diffuseurs croisés. */
@@ -452,11 +491,19 @@ const MODELS = {
  *             n'est plus posé au sol — réservé au miroir orbital
  *  spin     : rotation propre autour de la normale (rad/s)
  *  farKeep  : taille conservée au-delà de FADE_FAR (0 = disparition)
+ *  tilt     : inclinaison (rad) cuite dans la géométrie avant normalisation
  */
 const TUNING = {
   // Le miroir est une structure orbitale : grand, haut, et il reste
   // partiellement visible de loin (c'est de l'infrastructure spatiale).
-  orbital_mirror: { scale: 2.40, orbit: BALANCE.planet.radius * 1.115, spin: 0.35, farKeep: 0.30 },
+  orbital_mirror: {
+    scale: 1.95, orbit: BALANCE.planet.radius * 1.135, spin: 0.35, farKeep: 0.22,
+    // Inclinaison : à plat, la voile se lisait comme une assiette POSÉE sur le
+    // paysage. De biais, elle redevient un engin qui capte la lumière. À 0,62
+    // rad elle se présentait trop souvent de profil (un simple trait) ; 0,42
+    // garde la lecture de disque tout en cassant le parallélisme au sol.
+    tilt: 0.42,
+  },
   colony: { scale: 1.12, spin: 0 },
   biodome: { scale: 1.06, spin: 0, transparent: true, opacity: 0.72 },
   climate_stabilizer: { scale: 1.05, spin: 0.22 },
@@ -469,7 +516,9 @@ const TUNING = {
   mine: { scale: 0.92 },
   science_station: { scale: 0.90 },
 };
-const DEFAULT_TUNING = { scale: 1, orbit: 0, spin: 0, transparent: false, opacity: 1, farKeep: 0 };
+const DEFAULT_TUNING = {
+  scale: 1, orbit: 0, spin: 0, transparent: false, opacity: 1, farKeep: 0, tilt: 0,
+};
 
 /* -------------------------------------------------------------------------- */
 /*  Matériau                                                                  */
@@ -480,6 +529,8 @@ attribute vec3 aColor;
 attribute float aMask;
 
 uniform float uFarKeep;
+/** 1 = bâtiment posé au sol, 0 = structure orbitale (jamais effacée au limbe). */
+uniform float uGrounded;
 
 varying vec3 vPartColor;
 varying float vMask;
@@ -491,6 +542,8 @@ varying float vGround;
 const float FADE_NEAR = ${FADE_NEAR.toFixed(3)};
 const float FADE_FAR  = ${FADE_FAR.toFixed(3)};
 const float LIMB_BULGE = ${LIMB_BULGE.toFixed(5)};
+const float LIMB_FADE_IN  = ${LIMB_FADE_IN.toFixed(3)};
+const float LIMB_FADE_OUT = ${LIMB_FADE_OUT.toFixed(3)};
 const float PLANET_R = ${BALANCE.planet.radius.toFixed(4)};
 
 void main() {
@@ -506,24 +559,36 @@ void main() {
     vTint = vec3(1.0);
   #endif
 
+  // L'ancrage (origine locale de l'instance = base du bâtiment) sert à TOUT :
+  // c'est autour de lui qu'on rétrécit, et c'est lui qui donne la verticale
+  // locale. On le calcule donc avant quoi que ce soit d'autre.
+  vec3 anchor = (modelMatrix * im * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vec3 radial = normalize(anchor);
+  vec3 viewDir = normalize(cameraPosition - anchor);
+  float facing = dot(radial, viewDir);
+
   // --- ATTÉNUATION À DISTANCE ------------------------------------------
-  // La planète est centrée sur l'origine : la distance caméra suffit. On
-  // rétrécit le modèle AUTOUR DE SON ANCRAGE (base à y = 0), donc le bâtiment
-  // rentre dans le sol au lieu de s'évaporer sur place.
-  float camDist = length(cameraPosition);
+  // Distance de la caméra À CE BÂTIMENT-CI (voir FADE_NEAR). On rétrécit le
+  // modèle AUTOUR DE SON ANCRAGE (base à y = 0), donc le bâtiment rentre dans
+  // le sol au lieu de s'évaporer sur place.
+  float camDist = length(cameraPosition - anchor);
   float f = clamp((camDist - FADE_NEAR) / (FADE_FAR - FADE_NEAR), 0.0, 1.0);
   f = f * f * (3.0 - 2.0 * f);
   float shrink = mix(1.0, uFarKeep, f);
 
+  // --- EFFACEMENT DE LIMBE ---------------------------------------------
+  // Uniquement pour ce qui est POSÉ (uGrounded = 1) : une structure orbitale
+  // a parfaitement le droit de se détacher au bord du disque, c'est même là
+  // qu'elle se lit le mieux.
+  shrink *= mix(1.0, smoothstep(LIMB_FADE_IN, LIMB_FADE_OUT, facing), uGrounded);
+
   vec4 wp = modelMatrix * im * vec4(position * shrink, 1.0);
-  vec3 anchor = (modelMatrix * im * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 
   // --- MÊME GONFLEMENT DE LIMBE QUE LA SURFACE --------------------------
   // Sans cette correction, la surface se soulève au bord du disque (uLimbBulge
   // dans planet.glsl.js) mais pas les bâtiments : ils s'enfoncent exactement là
   // où l'ancrage est le plus visible.
-  vec3 radial = normalize(anchor);
-  float rim = 1.0 - abs(dot(radial, normalize(cameraPosition - anchor)));
+  float rim = 1.0 - abs(facing);
   wp.xyz += radial * (PLANET_R * LIMB_BULGE * pow(rim, 6.0));
 
   vWorld = wp.xyz;
@@ -565,8 +630,12 @@ void main() {
   // Occlusion de contact : le pied du bâtiment est dans son ombre propre.
   float ao = mix(0.55, 1.0, vGround);
 
+  // uNightAmbient est calibré pour le SOL (albédo ~0,4) ; la coque d'un
+  // bâtiment est cinq fois plus sombre et tombait donc à un noir absolu côté
+  // nuit. On relève l'ambiante de ce facteur : le volume garde une silhouette
+  // lisible au-dessus des lumières de colonie, sans devenir une lampe.
   vec3 color = base * uSunColor * wrap * uInsolation * ao
-             + base * uNightAmbient * 1.0;
+             + base * uNightAmbient * 4.2;
 
   // Reflet métallique discret : sans lui les volumes se lisent mal.
   vec3 H = normalize(V + L);
@@ -640,8 +709,12 @@ export class StructureLayer {
     const builder = MODELS[type];
     if (!builder) return null;
     const tune = this._tuning(type);
+    // Inclinaison éventuelle CUITE dans la géométrie : elle doit être prise en
+    // compte par la normalisation, sinon l'emprise mesurée serait fausse.
+    const raw = builder();
+    if (tune.tilt) raw.applyMatrix4(new THREE.Matrix4().makeRotationX(tune.tilt));
     // Normalisation : emprise = 1, base à y = 0 (ou centré si orbital).
-    const geometry = fitModel(builder(), tune.orbit > 0);
+    const geometry = fitModel(raw, tune.orbit > 0);
     const material = new THREE.ShaderMaterial({
       uniforms: {
         uSunDirection: this.shared.uSunDirection,
@@ -651,6 +724,7 @@ export class StructureLayer {
         uTime: this.shared.uTime,
         uOpacity: { value: tune.opacity ?? 1 },
         uFarKeep: { value: tune.farKeep ?? 0 },
+        uGrounded: { value: tune.orbit > 0 ? 0 : 1 },
       },
       vertexShader: structVertex,
       fragmentShader: structFragment,

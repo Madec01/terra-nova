@@ -2,7 +2,7 @@
  * Bilan planétaire : conditions de victoire, historiques (sparklines SVG)
  * et phase de mission courante.
  */
-import { el, clear, bar } from './dom.js';
+import { el, clear, bar, on } from './dom.js';
 import { BALANCE } from '../data/balance.js';
 import { formatNumber, clamp01, invLerp } from '../utils/math.js';
 
@@ -27,7 +27,9 @@ const SPARKS = [
 export class PlanetStatusPanel {
   constructor(ctx) {
     this.game = ctx.game;
+    this.ui = ctx.ui;
     this.tooltip = ctx.tooltip;
+    this._offs = [];
     this.node = null;
     this.rows = new Map();
     this.sparks = new Map();
@@ -67,9 +69,28 @@ export class PlanetStatusPanel {
       this.sparks.set(s.key, { def: s, svg, path, area, value, range });
     }
 
+    /* --- exploration : sondes, file d'attente, automatismes ----------- */
+    this.exploreLine = el('div', { class: 'tn-explore-line' });
+    this.autoBtn = el('button', { class: 'tn-btn tn-btn--wide', type: 'button' },
+      el('span', { text: 'Exploration automatique' }),
+      el('small', { text: 'les sondes libres choisissent seules leur cible' }));
+    this.scanBtn = el('button', { class: 'tn-btn tn-btn--wide', type: 'button' },
+      el('span', { text: 'Mode scan continu' }),
+      el('small', { text: 'chaque appui sur un secteur sombre met un scan en file' }));
+    this._offs.push(on(this.autoBtn, 'click', () => {
+      if (typeof this.game.setAutoExplore !== 'function') return;
+      this.game.setAutoExplore(!this.game.autoExplore);
+      this.update(this.game.state);
+    }));
+    this._offs.push(on(this.scanBtn, 'click', () => this.ui?.toggleScanMode?.()));
+    this.explore = el('div', { class: 'tn-explore' },
+      el('div', { class: 'tn-section-title', text: 'Exploration' }),
+      this.exploreLine, this.scanBtn, this.autoBtn);
+
     this.node = el('div', { class: 'tn-dock-panel tn-planet' },
       el('div', { class: 'tn-section-title', text: 'Phase de mission' }),
       el('div', { class: 'tn-phase' }, this.phaseName, this.phaseGoal),
+      this.explore,
       el('div', { class: 'tn-section-title', text: 'Conditions de terraformation' }),
       this.list, this.sustain,
       el('div', { class: 'tn-section-title', text: 'Historique' }),
@@ -86,6 +107,27 @@ export class PlanetStatusPanel {
       || BALANCE.phases.find((p) => p.id === state.progress?.phase) || BALANCE.phases[0];
     setText(this.phaseName, `${phase.id}/${BALANCE.phases.length} · ${phase.name}`);
     setText(this.phaseGoal, phase.desc || '');
+
+    // --- exploration ---------------------------------------------------
+    const ex = state.explore || {};
+    const total = Math.max(0, ex.probes ?? 0) * (BALANCE.exploration?.scansPerProbe || 1);
+    const busy = ex.scanning?.length ?? 0;
+    const free = Number.isFinite(ex.probesFree) ? ex.probesFree : Math.max(0, total - busy);
+    const queue = Array.isArray(ex.queue) ? ex.queue.length : null;
+    setText(this.exploreLine, `${free}${NB}sonde(s) libre(s) sur ${total} · ${busy}${NB}en cours`
+      + (queue === null ? '' : ` · ${queue}${NB}en file`));
+    const hasAuto = typeof this.game.setAutoExplore === 'function';
+    this.autoBtn.hidden = !hasAuto;
+    if (hasAuto) {
+      const on_ = !!this.game.autoExplore;
+      this.autoBtn.classList.toggle('is-active', on_);
+      this.autoBtn.setAttribute('aria-pressed', on_ ? 'true' : 'false');
+      setText(this.autoBtn.firstChild, on_ ? 'Exploration automatique : active' : 'Exploration automatique');
+    }
+    const scanning = this.ui?.scanMode === true;
+    this.scanBtn.classList.toggle('is-active', scanning);
+    this.scanBtn.setAttribute('aria-pressed', scanning ? 'true' : 'false');
+    setText(this.scanBtn.firstChild, scanning ? 'Mode scan continu : actif' : 'Mode scan continu');
 
     let report = [];
     try { report = this.game.victoryReport() || []; } catch (err) { console.warn('[PlanetStatus]', err); }
@@ -164,7 +206,11 @@ export class PlanetStatusPanel {
 
   onShow() { this._lastSpark = 0; this.update(this.game.state); }
 
-  destroy() { this.node?.remove(); this.node = null; this.rows.clear(); this.sparks.clear(); }
+  destroy() {
+    for (const off of this._offs) { try { off(); } catch { /* ignore */ } }
+    this._offs.length = 0;
+    this.node?.remove(); this.node = null; this.rows.clear(); this.sparks.clear();
+  }
 }
 
 /* -------------------------------------------------------------------- */

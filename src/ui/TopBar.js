@@ -7,6 +7,7 @@
  * transparence des systèmes de simulation.
  */
 import { el, bar } from './dom.js';
+import { BALANCE } from '../data/balance.js';
 import { formatNumber, formatSigned } from '../utils/math.js';
 
 const NB = '\u00A0';
@@ -37,6 +38,10 @@ const INDICATORS = [
   {
     key: 'temperature', short: 'TMP', name: 'Température', unit: '°C', digits: 1,
     trend: 'dTemperature', trendDigits: 2, contrib: 'temperature', good: 'high',
+    // Les lignes de contribution somment la température D'ÉQUILIBRE, que la
+    // température réelle rejoint lentement : le total ne doit donc pas être
+    // présenté comme la valeur affichée. Voir PLAYTEST I1.
+    equilibrium: true,
     desc: 'Température moyenne de surface. Cible de mission : entre 0 et 30 °C.',
   },
   {
@@ -51,12 +56,12 @@ const INDICATORS = [
   },
   {
     key: 'waterCoverage', short: 'H₂O', name: 'Eau libre', unit: '%', digits: 1, scale: 100,
-    trendHistory: 'water', trendDigits: 2, good: 'high',
+    trendHistory: 'water', trendDigits: 2, contrib: 'water', good: 'high',
     desc: 'Fraction de la surface couverte d’eau liquide.',
   },
   {
     key: 'biomass', short: 'BIO', name: 'Biomasse', unit: '', digits: 1,
-    trend: 'dBiomass', trendDigits: 2, good: 'high',
+    trend: 'dBiomass', trendDigits: 2, contrib: 'biomass', good: 'high',
     desc: 'Indice global de biosphère, de 0 à 100.',
   },
   {
@@ -214,7 +219,9 @@ export class TopBar {
       const contrib = state.contributions?.energy;
       if (Array.isArray(contrib) && contrib.length) {
         rows.push(tipSep());
-        for (const c of contrib.slice(0, 10)) rows.push(tipRow(c.label, formatSigned(c.value, 1), c.value));
+        for (const c of contrib.slice(0, 10)) {
+          rows.push(tipRow(c.label, formatSigned(c.value, 1) + NB + (c.unit || '/j'), c.value));
+        }
       }
     }
     if (cap > 0 && v >= cap * 0.999) {
@@ -228,8 +235,10 @@ export class TopBar {
     if (!state) return null;
     const raw = state.globals?.[def.key] ?? 0;
     const v = raw * (def.scale || 1);
+    // Le titre n'est pas mis en majuscules ici : la règle CSS `text-transform`
+    // emportait aussi l'unité (« 1.5 KPA »). Voir PLAYTEST C11.
     const rows = [
-      tipTitle(def.name.toUpperCase(), dec(v, def.digits) + (def.unit ? NB + def.unit : '')),
+      tipTitle(def.name, dec(v, def.digits) + (def.unit ? NB + def.unit : '')),
     ];
     const rate = this._rate(state, def);
     if (rate !== null) {
@@ -239,12 +248,33 @@ export class TopBar {
     if (Array.isArray(contrib) && contrib.length) {
       rows.push(tipSep());
       let total = 0;
+      let unit = '';
       for (const c of contrib) {
-        rows.push(tipRow(c.label, formatSigned(c.value, 1), c.value));
+        // L'unité de chaque ligne est portée par la simulation : sans elle, on
+        // empile des °C, des kPa/an et des points sans le dire. Voir I1.
+        const u = c.unit ? NB + c.unit : '';
+        if (c.unit) unit = c.unit;
+        rows.push(tipRow(c.label, formatSigned(c.value, 2) + u, c.value));
         total += c.value || 0;
       }
       rows.push(tipSep());
-      rows.push(tipRow('Total', formatSigned(total, 1), total, 'is-total'));
+      const totalUnit = unit ? NB + unit : '';
+      if (def.equilibrium) {
+        rows.push(tipRow('Équilibre visé', formatSigned(total, 2) + totalUnit, total, 'is-total'));
+        const gap = total - v;
+        rows.push(tipRow('Écart à combler', formatSigned(gap, 2) + totalUnit, gap));
+        const perYear = 1 - Math.pow(1 - (BALANCE.climate?.inertia ?? 0), 365);
+        rows.push(tipRow('Vitesse de convergence', (perYear * 100).toFixed(0) + NB + '%' + NB + 'de l’écart/an', 0));
+        rows.push(tipNote('La valeur affichée poursuit l’équilibre sans jamais l’atteindre d’un coup : agir déplace d’abord l’équilibre, la planète suit ensuite.'));
+      } else {
+        rows.push(tipRow('Total', formatSigned(total, 2) + totalUnit, total, 'is-total'));
+      }
+      if (def.key === 'oxygen') {
+        rows.push(tipNote('Les lignes ci-dessus décrivent le réservoir d’O₂ en kPa/an ; la valeur en tête est sa part dans l’atmosphère.'));
+      }
+    } else if (def.contrib) {
+      rows.push(tipSep());
+      rows.push(tipRow('Décomposition', 'indisponible', 0));
     }
     rows.push(tipNote(def.desc));
     return el('div', { class: 'tn-tip' }, rows);

@@ -14,19 +14,27 @@ export const TECH_BRANCHES = [
 
 export const TECHNOLOGIES = {
   /* --- INDUSTRIE ---------------------------------------------------- */
+  /*  La branche INDUSTRIE n'avait AUCUN effet mesurable : les matériaux ne
+   *  manquaient jamais. Maintenant que le stockage est resserré, que les
+   *  mégastructures coûtent 500 à 900 matériaux et qu'elles ont un entretien
+   *  EN matériaux, chacun de ses trois paliers déplace réellement la partie.  */
   metallurgy: {
     id: 'metallurgy', branch: 'industrie', name: 'Métallurgie avancée', cost: 40, requires: [],
-    desc: 'Traitement du minerai sur place.', unlocks: ['refinery'],
+    desc: 'Traitement du minerai sur place. Les dépôts et batteries gagnent 25 % de capacité.',
+    unlocks: ['refinery'],
+    effects: { storageMultiplier: { materials: 1.25 } },
   },
   automation: {
     id: 'automation', branch: 'industrie', name: 'Automatisation', cost: 120, requires: ['metallurgy'],
-    desc: 'Les mines et raffineries produisent 25 % de plus.',
-    effects: { productionMultiplier: { materials: 1.25 } },
+    desc: 'Les mines et raffineries produisent 35 % de plus.',
+    effects: { productionMultiplier: { materials: 1.35 } },
   },
   deep_drilling: {
     id: 'deep_drilling', branch: 'industrie', name: 'Forage profond', cost: 260, requires: ['automation'],
-    desc: 'Les mines fonctionnent même sur des gisements pauvres, et la géothermie gagne 20 %.',
-    effects: { minMineralOverride: 0.08, productionMultiplier: { energy: 1.0 } },
+    desc: 'Les mines exploitent les gisements pauvres, et toute la production énergétique gagne 20 %.',
+    /* Les mines exigent désormais 30 % de minerai : les bons sites sont rares
+       et cette technologie ouvre littéralement le reste de la planète. */
+    effects: { minMineralOverride: 0.10, productionMultiplier: { energy: 1.2 } },
   },
 
   /* --- ÉNERGIE ------------------------------------------------------ */
@@ -36,8 +44,8 @@ export const TECHNOLOGIES = {
   },
   energy_grid: {
     id: 'energy_grid', branch: 'energie', name: 'Réseau énergétique', cost: 110, requires: ['geothermal_tap'],
-    desc: 'Capacité de batterie doublée et pertes réduites.',
-    effects: { storageMultiplier: { energy: 2 } },
+    desc: 'Capacité de batterie doublée, et 10 % de production énergétique en plus.',
+    effects: { storageMultiplier: { energy: 2 }, productionMultiplier: { energy: 1.1 } },
   },
   fusion: {
     id: 'fusion', branch: 'energie', name: 'Fusion contrôlée', cost: 420, requires: ['energy_grid', 'atmospheric_engineering'],
@@ -69,8 +77,8 @@ export const TECHNOLOGIES = {
   /* --- BIOLOGIE ----------------------------------------------------- */
   exobiology: {
     id: 'exobiology', branch: 'biologie', name: 'Exobiologie', cost: 60, requires: [],
-    desc: 'Analyse du potentiel biologique du sol. +1 science par station scientifique.',
-    effects: { flatScience: 0.4 },
+    desc: 'Analyse du potentiel biologique du sol. +0,8 science par station scientifique.',
+    effects: { flatScience: 0.8 },
   },
   pioneer_organisms: {
     id: 'pioneer_organisms', branch: 'biologie', name: 'Organismes pionniers', cost: 150, requires: ['exobiology'],
@@ -91,6 +99,8 @@ export const TECHNOLOGIES = {
   orbital_survey: {
     id: 'orbital_survey', branch: 'espace', name: 'Cartographie orbitale', cost: 45, requires: [],
     desc: 'Une sonde supplémentaire et scans 35 % plus rapides.',
+    /* Première technologie « de confort » du jeu, et la seule qui agisse sur
+       le rythme de la reconnaissance : elle reste volontairement bon marché. */
     effects: { probes: 1, scanSpeed: 1.35 },
   },
   orbital_infrastructure: {

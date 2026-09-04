@@ -13,6 +13,12 @@
  *    node tools/visual-check.mjs a c e      # seulement celles dont le nom
  *                                           # commence par a-, c- ou e-
  *    node tools/visual-check.mjs --keep     # laisse le serveur tourner
+ *    node tools/visual-check.mjs --years=8  # partie plus courte (itération)
+ *
+ *  Le rendu est LOGICIEL (swiftshader) : chaque phase est chronométrée, et
+ *  navigateur comme serveur sont fermés dans un `finally` — un échec en cours
+ *  de route laissait auparavant un Chromium et un vite preview orphelins qui
+ *  ralentissaient toutes les exécutions suivantes.
  *
  *  Sortie : /tmp/tn-visual/*.png (surchargeable par SHOT_DIR).
  * ============================================================================
@@ -29,12 +35,20 @@ const SHOT_DIR = process.env.SHOT_DIR || '/tmp/tn-visual';
  * l'état à la main.
  */
 const SEED = 8919;
-/** Années de jeu simulées avant la capture « terraformée ». */
-const YEARS = 40;
+/**
+ * Années de jeu simulées avant la capture « terraformée ». Réglable par
+ * `--years=N` pour itérer vite sur un shader ; la valeur de RÉFÉRENCE, celle
+ * qui reproduit les chiffres de balance-probe, reste 40.
+ */
+const YEARS = Number((process.argv.find((a) => a.startsWith('--years=')) || '').slice(8)) || 40;
 const PORT = 5600 + Math.floor(Math.random() * 300);
 const KEEP = process.argv.includes('--keep');
 /** Filtres passés en argument : `node tools/visual-check.mjs a c` → a-*, c-*. */
 const FILTERS = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+
+/** Chronométrage des phases : le harnais est lent, il faut savoir où. */
+const T0 = Date.now();
+const lap = (label) => console.log(`  … ${label} (${((Date.now() - T0) / 1000).toFixed(1)} s)`);
 
 /** Chromium : même stratégie de recherche que le test de fumée. */
 function findChromium() {
@@ -113,17 +127,43 @@ function aimInPage(cfg) {
 
 const errors = [];
 
+/**
+ * Ressources externes de l'exécution. Elles sont fermées par `run()` dans un
+ * `finally`, échec compris : sans cela un plantage laissait tourner un
+ * Chromium et un vite preview qui monopolisaient le processeur.
+ */
+const owned = { vite: null, browser: null };
+
 async function run() {
+  try { await runInner(); } catch (e) {
+    // Un échec précoce (la page ne démarre pas) laissait l'utilisateur sans la
+    // seule information utile : ce que la console du navigateur a dit. On la
+    // recrache avant de relancer l'erreur.
+    if (errors.length) {
+      console.error(`\n${errors.length} erreur(s) console AVANT l'échec :`);
+      errors.slice(0, 10).forEach((x) => console.error('  ✘ ' + x.slice(0, 400)));
+    }
+    throw e;
+  } finally {
+    if (owned.browser) { try { await owned.browser.close(); } catch { /* déjà fermé */ } }
+    if (owned.vite && !KEEP) { try { process.kill(-owned.vite.pid, 'SIGTERM'); } catch { /* déjà mort */ } }
+  }
+}
+
+async function runInner() {
   process.stdout.write('Build de production … ');
   await buildOnce();
   console.log('ok');
+  lap('build');
   const vite = await startServer();
+  owned.vite = vite;
 
   const exe = findChromium();
   const browser = await chromium.launch({
     executablePath: exe,
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--disable-dev-shm-usage'],
   });
+  owned.browser = browser;
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
 
   page.on('console', (msg) => {
@@ -158,6 +198,7 @@ async function run() {
 
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'load', timeout: 30000 });
   await page.waitForFunction(() => !!window.TERRA, { timeout: 20000 });
+  lap('page prête');
   await page.evaluate((seed) => window.TERRA.game.newGame({ seed }), SEED);
   await page.waitForTimeout(1200);
   await hideUI(true);
@@ -310,13 +351,33 @@ async function run() {
     for (const b of S.buildings) kinds[b.type] = (kinds[b.type] || 0) + 1;
     return {
       built: S.buildings.length, kinds, day: S.time.day | 0,
+      globals: { ...S.globals },
       victoryYear: victoryDay === null ? null : +(victoryDay / 365).toFixed(1),
     };
   }, YEARS);
+  lap(`partie jouée (${YEARS} ans)`);
   console.log(`  (partie jouée : ${terra.built} bâtiments, jour ${terra.day}, `
     + `victoire an ${terra.victoryYear ?? '—'})`);
   console.log('   types : ' + Object.entries(terra.kinds)
     .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}×${n}`).join(', '));
+
+  // GARDE-FOU. Le rendu se cale sur cet état ; un autre agent rééquilibre la
+  // simulation en parallèle. Si la partie jouée sort de l'enveloppe plausible
+  // d'un monde terraformé, les images du jour ne prouvent plus rien et il faut
+  // le SAVOIR — d'où cet avertissement, volontairement large (on refuse
+  // l'absurde, pas la dérive de quelques points).
+  if (YEARS >= 30) {
+    const g = terra.globals;
+    const bad = [];
+    if (!(g.temperature > 0 && g.temperature < 45)) bad.push(`T=${g.temperature.toFixed(1)} °C`);
+    if (!(g.pressure > 40)) bad.push(`P=${g.pressure.toFixed(1)} kPa`);
+    if (!(g.oxygen > 12)) bad.push(`O2=${g.oxygen.toFixed(1)} %`);
+    if (!(terra.built > 60)) bad.push(`${terra.built} bâtiments`);
+    if (bad.length) {
+      console.log('\n  ⚠ LA PARTIE JOUÉE N’EST PAS UN MONDE TERRAFORMÉ : ' + bad.join(', '));
+      console.log('    Les seuils de rendu calés sur ces images seraient faux.');
+    }
+  }
   await page.waitForTimeout(2500);   // le lissage des globales converge
 
   /* --- c : monde vivant, même cadrage que a ---------------------------- */
@@ -370,6 +431,10 @@ async function run() {
   await page.evaluate(() => window.TERRA.scene.setLayer('normal'));
   await page.waitForTimeout(900);
 
+  /* --- distance de cadrage par défaut, lue sur la scène ------------------ */
+  const fitDist = await page.evaluate(() => window.TERRA.scene.fitDistance || 3.05);
+  console.log(`  (cadrage par défaut : ${fitDist.toFixed(2)} unités)`);
+
   /* --- i : zoom rapproché ----------------------------------------------- */
   await aim({ dTheta: -0.35, dPhi: 0.20, dist: 1.6 });
   await shot('i-zoom');
@@ -382,13 +447,93 @@ async function run() {
   for (const [name, cfg] of [
     ['l1-batiments-pres', { dTheta: -0.75, dPhi: 0.30, dist: 1.85 }],
     ['l2-batiments-limbe', { dTheta: -1.38, dPhi: 0.30, dist: 2.10 }],
-    ['l3-batiments-loin', { dTheta: -0.90, dPhi: 0.18, dist: 3.05 }],
+    // l3 utilise la distance de cadrage RÉELLE de SceneManager (_fitDistance),
+    // celle où le joueur voit sa planète entière : c'est l'image qui décide si
+    // la vue d'ensemble montre un monde ou une couronne de babioles.
+    ['l3-batiments-loin', { dTheta: -0.90, dPhi: 0.18, dist: fitDist }],
     // Côté nuit rapproché : c'est la seule image qui juge l'émissif (fenêtres,
     // voyants). Il doit se voir, sans transformer les bâtiments en lampions.
     ['l4-batiments-nuit', { dTheta: Math.PI - 0.55, dPhi: 0.12, dist: 1.95 }],
   ]) {
     await aim(cfg);
     await shot(name);
+  }
+
+  /* --- l5 : une COLONIE de nuit, vue oblique rapprochée ------------------ */
+  // l4 photographie l'hémisphère nocturne : à cette échelle un hublot fait un
+  // pixel et l'image ne prouve rien. Celle-ci vise la colonie la plus peuplée
+  // depuis sa propre verticale locale, à la distance minimale du jeu : c'est
+  // la seule image qui dise si l'émissif « prolonge les lumières de colonie »
+  // ou s'il reste une intention de code.
+  if (wanted('l5')) {
+    const ok = await page.evaluate(() => {
+      const g = window.TERRA.game, sc = window.TERRA.scene, R = g.regions;
+      const s = sc.sunDirection;
+      // La colonie la plus enfoncée dans la nuit (produit scalaire minimal
+      // avec la direction de l'étoile) : c'est là que l'émissif se juge.
+      let best = -1, bestDot = 2;
+      for (const b of g.state.buildings) {
+        if (b.type !== 'colony') continue;
+        const i = b.region | 0;
+        const d = R.positions[i * 3] * s.x + R.positions[i * 3 + 1] * s.y + R.positions[i * 3 + 2] * s.z;
+        if (d < bestDot) { bestDot = d; best = i; }
+      }
+      if (best < 0) return false;
+
+      const p = R.positions;
+      const nx = p[best * 3], ny = p[best * 3 + 1], nz = p[best * 3 + 2];
+      // Écart PERPENDICULAIRE au plan de l'étoile : la cellule reste dans la
+      // nuit alors que la caméra la voit de trois quarts.
+      const dn = s.x * nx + s.y * ny + s.z * nz;
+      let tx = s.x - nx * dn, ty = s.y - ny * dn, tz = s.z - nz * dn;
+      const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx;
+      const ca = Math.cos(0.80), sa = Math.sin(0.80);
+      const vx = nx * ca + bx * sa, vy = ny * ca + by * sa, vz = nz * ca + bz * sa;
+      const cc = sc.controls;
+      cc.autoRotate = false; cc._focus = null; cc.vTheta = 0; cc.vPhi = 0;
+      cc.theta = Math.atan2(vx, vz);
+      cc.phi = Math.max(0.02, Math.min(Math.PI - 0.02, Math.acos(Math.max(-1, Math.min(1, vy)))));
+      // La distance MINIMALE que le joueur peut réellement atteindre : un zoom
+      // plus serré flatterait l'émissif et ne prouverait rien.
+      const dMin = window.TERRA.BALANCE.render.cameraMinDistance;
+      cc.distance = dMin; cc.targetDistance = dMin;
+      const cr = sc.planet.cellRadius[best];
+      cc.target.set(nx * cr, ny * cr, nz * cr);
+      cc._applyCamera();
+      return true;
+    });
+    if (ok) await shot('l5-colonie-nuit', 1600);
+    else console.log('  · l5-colonie-nuit : aucune colonie, capture ignorée');
+  }
+
+  /* --- l6 : le chemin RÉEL de l'interface, scene.focusRegion() ---------- */
+  // Le seul cadrage que le joueur obtient d'un clic. Il est piégeux : les
+  // contrôles placent la caméra à `distance` de leur CIBLE, or focusRegion met
+  // la cible sur la cellule — la caméra finit donc bien plus loin du centre de
+  // la planète que ce chiffre ne le laisse croire. Si l'atténuation de
+  // StructureLayer se trompe de repère, c'est ICI que le bâtiment disparaît au
+  // moment précis où le joueur demande à le voir.
+  if (wanted('l6')) {
+    const r = await page.evaluate(() => {
+      const g = window.TERRA.game, sc = window.TERRA.scene;
+      const b = g.state.buildings.find((x) => x.type === 'colony')
+        || g.state.buildings.find((x) => x.type === 'atmo_processor')
+        || g.state.buildings[0];
+      if (!b) return null;
+      sc.controls.autoRotate = false;
+      sc.focusRegion(b.region | 0);
+      return { type: b.type, region: b.region | 0 };
+    });
+    if (r) {
+      await page.waitForTimeout(1500);          // la transition dure ~0,85 s
+      const d = await page.evaluate(() => {
+        const c = window.TERRA.scene.camera;
+        return +Math.hypot(c.position.x, c.position.y, c.position.z).toFixed(2);
+      });
+      console.log(`  (focusRegion sur ${r.type} : caméra à ${d} du centre)`);
+      await shot('l6-focus-region', 900);
+    }
   }
 
   /* --- diagnostic chiffré : AVANT toute réinitialisation ---------------- */
@@ -514,8 +659,7 @@ async function run() {
 
 
   const stats = await page.evaluate(() => ({ ...window.TERRA.scene.stats }));
-  await browser.close();
-  if (!KEEP) { try { process.kill(-vite.pid, 'SIGTERM'); } catch {} }
+  lap('captures terminées');
 
   console.log(`\n${stats.drawCalls} draw calls, ${stats.triangles} triangles, ${stats.regions} régions`);
   console.log('─────────────────────────────────────────');

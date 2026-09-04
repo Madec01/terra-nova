@@ -51,7 +51,11 @@ export const BALANCE = {
   /*  ÉTAT INITIAL DE LA PARTIE                                            */
   /* --------------------------------------------------------------------- */
   start: {
-    resources: { energy: 120, materials: 260, science: 0, biomass: 0, water: 40 },
+    /* Début de partie NON punitif : de quoi lancer trois scans de zone et
+       poser les deux premiers bâtiments sans attendre. La rareté doit piquer
+       au MILIEU de partie (mégastructures), pas dans les cinq premières
+       minutes. */
+    resources: { energy: 200, materials: 420, science: 0, biomass: 0, water: 40 },
     globals: {
       temperature: -52,      // °C moyenne planétaire
       pressure: 1.6,         // kPa
@@ -70,11 +74,16 @@ export const BALANCE = {
   /*  STOCKAGE DES RESSOURCES                                              */
   /* --------------------------------------------------------------------- */
   storage: {
-    energy: 400,      // capacité de batterie de base
-    materials: 1200,
-    water: 600,
+    /* RARETÉ VOULUE — le stock de matériaux était plein 92 % des jours : la
+       production était jetée et le joueur n'arbitrait jamais. Les plafonds de
+       base couvrent désormais UN bâtiment de palier 2, pas trois de palier 3.
+       Le dépôt logistique redevient de ce fait un vrai choix : sans lui, on
+       ne peut tout simplement pas épargner de quoi payer une mégastructure. */
+    energy: 260,      // capacité de batterie de base
+    materials: 420,
+    water: 350,
     /** Bonus de capacité par dépôt construit. */
-    perDepot: { energy: 350, materials: 900, water: 500 },
+    perDepot: { energy: 340, materials: 650, water: 460 },
     /** La science et la biomasse ne sont pas plafonnées. */
   },
 
@@ -228,8 +237,9 @@ export const BALANCE = {
     /** Pénalité pour variation rapide de pression (par kPa/an au-delà du seuil). */
     pressureRateThreshold: 1.6,
     pressureRatePenalty: 1.5,
-    /** Pénalité de pollution globale. */
-    pollutionPenalty: 9.0,
+    /** Pénalité de pollution globale. Relevée avec la pollution des
+        mégastructures : la stabilité redevient un poste à surveiller. */
+    pollutionPenalty: 13.0,
     /** Bonus apporté par la biomasse (écosystème tampon). */
     biomassBonus: 0.05,
     /** Bonus par stabilisateur climatique et par jour. */
@@ -263,11 +273,19 @@ export const BALANCE = {
     /** Population initiale et croissance. */
     seedPopulation: 400,
     growthRate: 0.0045,          // par jour, modulé par l'habitabilité
-    capacityPerColony: 15000,
-    /** Consommations par 1000 habitants et par jour (besoin BRUT). */
-    upkeepPer1k: { energy: 1.6, water: 0.9, biomass: 0.55 },
-    /** Productions par 1000 habitants et par jour. */
-    outputPer1k: { science: 0.75, materials: 0.5 },
+    capacityPerColony: 20000,
+    /** Consommations par 1000 habitants et par jour (besoin BRUT).
+     *  `materials` (entretien des habitats, des serres, des véhicules) est le
+     *  SEUL puits de matériaux qui grandit avec la partie : sans lui, une fois
+     *  la flotte de terraformation posée, la production s'accumulait sans
+     *  emploi et le stock restait plein. Une civilisation coûte à entretenir. */
+    upkeepPer1k: { energy: 1.6, water: 0.9, biomass: 0.55, materials: 1.3 },
+    /** Productions par 1000 habitants et par jour.
+     *  La science des colonies a été divisée par deux : elle noyait la fin de
+     *  partie sous des milliers de points et vidait la recherche progressive
+     *  de son enjeu (l'arbre entier tombait avant la victoire, quel que soit
+     *  son coût). Les stations scientifiques redeviennent le vrai levier. */
+    outputPer1k: { science: 0.25, materials: 0.35 },
     /**
      * AUTOSUFFISANCE LOCALE — la cause de l'effondrement démographique était
      * là : une colonie était nourrie et abreuvée exclusivement par les stocks
@@ -322,33 +340,72 @@ export const BALANCE = {
   /* --------------------------------------------------------------------- */
   /*  EXPLORATION                                                          */
   /* --------------------------------------------------------------------- */
+  /*  Un scan ne révèle plus UNE cellule mais une ZONE : la cible, tout le
+   *  premier anneau de voisins, et une partie du second. La cartographie
+   *  complète d'une partie gagnée passe ainsi de ~313 scans à moins de 80,
+   *  sans que le scan devienne gratuit — il coûte de l'énergie ET des
+   *  matériaux, donc il se dispute les mêmes ressources que la construction.
+   *  Les sondes restent rares : viser une anomalie ou une zone riche plutôt
+   *  que la case d'à côté reste la vraie décision.                          */
   exploration: {
     /** Durée d'un scan orbital, en jours. */
-    scanDays: 14,
-    /** Coût d'un scan. */
-    scanCost: { energy: 25 },
+    scanDays: 16,
+    /** Coût d'un scan. Les matériaux en font un ARBITRAGE, pas une formalité. */
+    scanCost: { energy: 40, materials: 14 },
     /** Nombre de scans simultanés par sonde. */
     scansPerProbe: 1,
-    /** Science gagnée par région révélée. */
+    /** Science gagnée par la région visée. */
     sciencePerScan: 4,
-    /** Probabilité qu'un scan révèle une anomalie exploitable. */
+    /** Science gagnée par région supplémentaire révélée dans la zone. */
+    sciencePerZoneRegion: 1,
+    /** Bonus de science par anomalie révélée (cible ou zone). */
     anomalyScienceBonus: 30,
-    /** Rayon de révélation : le scan révèle aussi les voisins avec cette proba. */
-    neighborRevealChance: 0.35,
+    /**
+     * Probabilité de révélation par ANNEAU autour de la cible.
+     * [0] = voisins directs, [1] = voisins des voisins…
+     * 1 + 6×1,0 + 12×0,45 ≈ 12 secteurs par scan.
+     */
+    zoneRings: [1.0, 0.45],
+    /** Longueur maximale de la file d'attente des scans. */
+    maxQueue: 16,
+    /** Profondeur de file entretenue par l'exploration automatique. */
+    autoQueueDepth: 3,
+    /** Remboursement du coût à l'annulation d'un scan DÉJÀ lancé. */
+    cancelRefund: 0.5,
   },
 
   /* --------------------------------------------------------------------- */
   /*  RECHERCHE                                                            */
   /* --------------------------------------------------------------------- */
+  /*  RECHERCHE PROGRESSIVE — on ne « fait plus ses courses ».
+   *  Le joueur ENGAGE son laboratoire sur une technologie ; la science
+   *  produite l'alimente jour après jour ; changer d'avis coûte la moitié des
+   *  points investis. L'ordre de recherche redevient une décision de tempo
+   *  (« j'accélère l'atmosphère ou la biologie ? ») au lieu d'une liste. */
   research: {
     /**
      * Multiplicateur global du coût des technologies. À 1, l'arbre entier
      * tombait en cinq ans : la partie n'avait plus aucune progression et le
      * joueur disposait de tous les leviers avant même d'avoir un climat.
+     * Relevé de 12 à 20 : la recherche étant devenue progressive, c'est elle
+     * qui donne désormais son tempo à la partie. Une technologie de départ
+     * demande 3 à 6 mois, une technologie terminale plus d'un an — assez pour
+     * que l'ordre choisi se paye, pas assez pour bloquer la partie.
      */
-    costScale: 12,
+    costScale: 20,
     /** Science produite passivement par la station de commandement. */
     baseScience: 0.35,
+    /**
+     * Part du REVENU de science absorbée par la recherche en cours. Le reste
+     * s'accumule en stock et sert à payer les coûts en science des bâtiments :
+     * c'est ce qui garde une tension entre « chercher » et « construire ».
+     * À 0,85, un laboratoire engagé ne laisse qu'un filet de science libre :
+     * financer une mégastructure demande d'anticiper, voire de laisser le
+     * laboratoire au repos quelques semaines.
+     */
+    focus: 0.85,
+    /** Fraction des points investis rendue en cas d'abandon. */
+    refund: 0.5,
   },
 
   /* --------------------------------------------------------------------- */
@@ -368,24 +425,30 @@ export const BALANCE = {
   /* --------------------------------------------------------------------- */
   /*  CONDITIONS DE VICTOIRE                                               */
   /* --------------------------------------------------------------------- */
+  /*  OBJECTIFS RESSERRÉS — ils étaient dépassés d'un facteur 2 à 7 (105 000
+   *  habitants pour 15 000 exigés) : les huit conditions ne se refermaient
+   *  jamais ensemble, la partie se gagnait quand la plus lente arrivait. Les
+   *  seuils ci-dessous sont calés juste SOUS ce qu'un joueur soigneux obtient,
+   *  pour que la fin de partie soit une visée et non un franchissement. */
   victory: {
-    temperature: { min: 0, max: 30 },
-    pressure: { min: 60 },
-    oxygen: { min: 16 },
-    /* 0,18 et non 0,25 : la géométrie des bassins (BALANCE.water.basinDepth et
-       la fraction de cellules sous le niveau de mer) plafonne la couverture
-       atteignable autour de 22 %. L'ancienne cible était inatteignable. */
+    temperature: { min: 2, max: 24 },
+    pressure: { min: 76 },
+    oxygen: { min: 21 },
+    /* La géométrie des bassins (BALANCE.water.basinDepth et la fraction de
+       cellules sous le niveau de mer) plafonne la couverture atteignable
+       entre 18 et 24 % selon la seed : c'est la condition la plus dépendante
+       du monde tiré, donc celle qu'il ne faut PAS serrer davantage. */
     waterCoverage: { min: 0.18 },
-    biomass: { min: 45 },
-    population: { min: 15000 },
-    stability: { min: 75 },
+    biomass: { min: 68 },
+    population: { min: 52000 },
+    stability: { min: 90 },
     /**
      * Le climat doit avoir CESSÉ DE DÉRIVER (°C/an en valeur absolue).
      * Sans cette condition, une planète en pleine surchauffe traversait la
      * fourchette 0–30 °C assez lentement pour valider les 180 jours au passage
      * et gagner « sans le faire exprès ». Terraformer, c'est stabiliser.
      */
-    maxDrift: { max: 1.5 },
+    maxDrift: { max: 1.0 },
     /** Toutes les conditions doivent tenir ce nombre de jours consécutifs. */
     sustainDays: 180,
   },
