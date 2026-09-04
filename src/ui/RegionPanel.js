@@ -135,8 +135,9 @@ export class RegionPanel {
 
   _applyState() {
     if (!this.node) return;
-    const peek = this.ui?.isPhone && !this.expanded;
-    this.node.classList.toggle('is-peek', !!peek);
+    // Le repli existe aussi à la souris : le chevron de l'en-tête doit agir
+    // partout, pas seulement sur téléphone.
+    this.node.classList.toggle('is-peek', !this.expanded);
     if (this.collapseBtn) {
       this.collapseBtn.textContent = this.expanded ? '▾' : '▴';
       this.collapseBtn.setAttribute('aria-label', this.expanded ? 'Réduire la fiche' : 'Déplier la fiche');

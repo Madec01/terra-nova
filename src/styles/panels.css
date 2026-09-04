@@ -262,8 +262,8 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
-  width: 36px;
-  height: 40px;
+  width: 54px;      /* « Construire » demandait 46 px dans 34 : plus de coupe */
+  height: 44px;
   color: var(--tn-dim);
   border: 1px solid transparent;
   transition: color var(--tn-fast) ease, background var(--tn-fast) ease, border-color var(--tn-fast) ease;
@@ -271,7 +271,7 @@
 .tn-tool-icon { font-size: 16px; line-height: 1; }
 .tn-tool-label {
   font-family: var(--tn-mono);
-  font-size: 7px;
+  font-size: 8px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   max-width: 100%;
@@ -1195,3 +1195,7 @@ html.tn-phone .tn-scrim {
 /* --- Divers ------------------------------------------------------------ */
 .tn-phone-only { display: none; }
 html.tn-phone .tn-phone-only { display: inline-flex; }
+
+/* Fiche de secteur repliée : seul l'essentiel reste (partout, pas seulement
+   sur téléphone — le chevron de l'en-tête doit agir à la souris aussi). */
+.tn-region.is-peek .tn-region-details { display: none; }

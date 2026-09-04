@@ -32,7 +32,7 @@
 
   /* --- métriques -------------------------------------------------------- */
   --tn-top-h: 58px;
-  --tn-rail: 46px;
+  --tn-rail: 66px;
   --tn-panel-w: 300px;
   --tn-gap: 10px;
   --tn-cut: 9px;
@@ -249,7 +249,7 @@ body:has(.tn-ui.is-scanning) > canvas { cursor: cell; }
 .tn-notifs > * { pointer-events: auto; }
 /* La fiche de secteur porte « Construire ici » et les démolitions : les
    bulles se décalent plutôt que de voler les clics (PLAYTEST C6). */
-.tn-ui.has-region .tn-notifs { right: calc(var(--tn-panel-w) + 2 * var(--tn-gap)); }
+html:not(.tn-phone) .tn-ui.has-region .tn-notifs { right: calc(var(--tn-panel-w) + 2 * var(--tn-gap)); }
 
 .tn-debug {
   position: absolute;
@@ -364,6 +364,8 @@ body:has(.tn-ui.is-scanning) > canvas { cursor: cell; }
 /* Sous 1100 px, deux rangées : ressources puis indicateurs. */
 @media (max-width: 1100px) {
   :root { --tn-top-h: 88px; }
+  /* Au doigt, chaque cellule fait 44 px : la barre est plus haute. */
+  html.tn-touch { --tn-top-h: 106px; }
   .tn-topbar { flex-direction: column; gap: 2px; padding-bottom: 8px; }
   .tn-res-cell { min-width: 96px; }
   .tn-ind-cell { min-width: 72px; }
@@ -371,6 +373,24 @@ body:has(.tn-ui.is-scanning) > canvas { cursor: cell; }
 
 @media (max-width: 820px) {
   :root { --tn-panel-w: 264px; }
+}
+
+/* Fenêtre étroite sur ORDINATEUR : la fiche de secteur passe en bandeau bas
+   pour ne pas croiser le panneau latéral. Le survol, lui, ne change pas —
+   c'est la différence avec le mode téléphone. */
+@media (max-width: 760px) {
+  html:not(.tn-phone) .tn-region {
+    left: 0; right: 0; bottom: 0; top: auto;
+    width: auto;
+    max-height: 52vh;
+    border-left: 0; border-right: 0; border-bottom: 0;
+    z-index: 35;
+  }
+  html:not(.tn-phone) .tn-region.is-peek .tn-region-details { display: none; }
+  html:not(.tn-phone) .tn-left { bottom: 96px; }
+  html:not(.tn-phone) .tn-notifs { left: var(--tn-gap); right: var(--tn-gap); width: auto; bottom: 54vh; }
+  html:not(.tn-phone) .tn-ui.has-region .tn-notifs { right: var(--tn-gap); }
+  html:not(.tn-phone) .tn-region .tn-collapse { display: inline-flex; }
 }
 
 /* --- 2. Pointeur grossier : cibles de 44 px, libellés visibles -------- */
@@ -526,7 +546,7 @@ html.tn-phone .tn-notifs {
 }
 /* Quand un bandeau de mode occupe le haut, les bulles se rangent dessous. */
 html.tn-phone .tn-ui.is-placing .tn-notifs,
-html.tn-phone .tn-ui.is-scanning .tn-notifs { top: calc(var(--tn-top-h) + 52px); }
+html.tn-phone .tn-ui.is-scanning .tn-notifs { top: calc(var(--tn-top-h) + 82px); }
 html.tn-phone .tn-debug {
   left: 6px; right: 6px; width: auto;
   bottom: calc(var(--tn-bottom-h) + 6px);
@@ -571,12 +591,23 @@ html.tn-phone-land .tn-region {
 html.tn-phone-land .tn-region.is-peek .tn-region-details { display: block; }
 html.tn-phone-land .tn-region.is-peek .tn-panel-body { overflow-y: auto; }
 html.tn-phone-land .tn-sheet-grab { display: none; }
+/* En paysage la fiche latérale a la place d'afficher le détail : le chevron
+   de repli n'aurait rien à replier. */
+html.tn-phone-land .tn-region .tn-collapse { display: none; }
 /* En paysage les feuilles occupent les côtés : les bulles se rangent dans
    l'espace libre, jamais par-dessus une commande. */
 html.tn-phone-land .tn-notifs { left: 8px; right: 8px; width: auto; }
 html.tn-phone-land .tn-ui.has-region .tn-notifs { left: calc(min(320px, 50vw) + 12px); }
 html.tn-phone-land .tn-ui.has-panel .tn-notifs { right: calc(min(340px, 52vw) + 12px); }
-html.tn-phone-land .tn-center-stack { max-width: 60vw; width: auto; }
+/* En paysage, le bandeau se range du côté opposé à la feuille ouverte : il ne
+   recouvre jamais le panneau que le joueur est en train de lire. */
+html.tn-phone-land .tn-center-stack { max-width: 52vw; width: auto; }
+html.tn-phone-land .tn-ui.has-region .tn-center-stack {
+  left: auto; right: calc(8px + var(--tn-safe-r)); transform: none; max-width: 46vw;
+}
+html.tn-phone-land .tn-ui.has-panel .tn-center-stack {
+  left: calc(8px + var(--tn-safe-l)); right: auto; transform: none; max-width: 46vw;
+}
 
 /* --- 5. Zones sûres sur les surfaces plein écran ---------------------- */
 html.tn-phone .tn-overlay {

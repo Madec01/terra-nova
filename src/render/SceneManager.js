@@ -354,13 +354,22 @@ export class SceneManager {
     if (this.bus) this.bus.emit('render:hover', { regionId: id });
   }
 
-  /** Transition animée de la caméra vers une région. */
-  focusRegion(regionId) {
+  /**
+   * Transition animée de la caméra vers une région.
+   * @param {number} regionId
+   * @param {number} [fitRatio] fraction de la distance « planète entière » ;
+   *   voir BALANCE.render.startFitRatio / focusFitRatio.
+   */
+  focusRegion(regionId, fitRatio) {
     if (!this.planet || !this.regions) return;
     if (regionId === null || regionId === undefined) return;
     this.planet.getRegionPosition(this.regions, regionId | 0, this._vec);
-    const dist = clamp(BALANCE.render.cameraMinDistance * 1.35,
-      BALANCE.render.cameraMinDistance, BALANCE.render.cameraMaxDistance);
+    // Relatif au cadrage plein-planète et non absolu : sur un écran en
+    // portrait, celui-ci est bien plus éloigné, et une distance fixe donnait
+    // un zoom si serré qu'on ne voyait plus que quelques hexagones.
+    const fit = this.fitDistance || this._fitDistance();
+    const ratio = Number.isFinite(fitRatio) ? fitRatio : BALANCE.render.focusFitRatio;
+    const dist = clamp(fit * ratio, this.controls.minDistance, this.controls.maxDistance);
     this.controls.focus(this._vec, dist);
   }
 

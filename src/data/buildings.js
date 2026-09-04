@@ -67,7 +67,7 @@ export const BUILDINGS = {
     desc: 'Extrait les minerais de la croûte. Rendement proportionnel à la richesse minérale locale.',
     cost: { materials: 110 },
     upkeep: { energy: 3.2 },
-    produces: { materials: 5.0 },
+    produces: { materials: 4.4 },
     /* Seuil relevé de 0,22 à 0,30 : les bons gisements deviennent rares, ce
        qui donne enfin un sens à « Forage profond » (minMineralOverride). */
     requires: { minerals: 0.30 },
@@ -90,7 +90,7 @@ export const BUILDINGS = {
     /* Les mines sont plafonnées à 6 : la raffinerie n'est plus un bonus de
        confort, c'est LE moyen de dépasser le plafond d'extraction. Posée au
        milieu d'un chapelet de mines, elle vaut à elle seule trois mines. */
-    neighborBonus: { building: 'mine', resource: 'materials', factor: 1.7 },
+    neighborBonus: { building: 'mine', resource: 'materials', factor: 2.3 },
     outputScale: (r) => 0.6 + r.minerals * 0.9,
   },
 
@@ -310,13 +310,16 @@ export const BUILDINGS = {
     desc: 'Cultive des organismes pionniers et ensemence la région. Nécessite eau et douceur.',
     cost: { materials: 340, science: 120 },
     upkeep: { energy: 9.0, water: 1.4 },
-    produces: { biomass: 0.69 },
+    produces: { biomass: 0.92 },
     requires: { tech: 'pioneer_organisms', minTemp: -25 },
-    local: { vegetation: 0.0084, moisture: 0.0016 },
+    local: { vegetation: 0.0112, moisture: 0.0021 },
     // Craquage d'appoint : symbolique à côté de la photosynthèse planétaire.
     global: { oxygen: 0.00012 },
     maxPerRegion: 1,
-    maxTotal: 6,
+    /* Le bio-dôme AMORCE (une région, très fort) ; la tour d'ensemencement
+       PROPAGE (tout le voisinage). Quatre amorces suffisent : c'est la
+       propagation qui verdit une planète, pas la culture sous cloche. */
+    maxTotal: 4,
   },
 
   seeder: {
@@ -324,10 +327,10 @@ export const BUILDINGS = {
     desc: 'Disperse des spores sur toute la zone. Accélère fortement la propagation végétale.',
     cost: { materials: 580, science: 260 },
     upkeep: { energy: 12, water: 2.0, materials: 0.4 },
-    produces: { biomass: 1.0 },
+    produces: { biomass: 1.3 },
     requires: { tech: 'forestation' },
     local: { vegetation: 0.0060 },
-    spread: { radius: 1, vegetation: 0.0043 },
+    spread: { radius: 1, vegetation: 0.0095 },
     maxPerRegion: 1,
     maxTotal: 5,
   },

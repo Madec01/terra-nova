@@ -390,8 +390,8 @@ export class UIManager {
   _showOnboarding() {
     if (!this.hintBar) return;
     const verb = this.isTouch ? 'Appuyez' : 'Cliquez';
-    this.hintText.textContent = 'Objectif : cartographier trois secteurs. '
-      + verb + ' sur un secteur sombre, puis sur « Lancer un scan orbital ».';
+    this.hintText.textContent = 'Objectif : cartographier trois secteurs. '
+      + verb + ' sur un secteur sombre, puis sur « Lancer un scan orbital ».';
     this.hintBar.hidden = false;
   }
 
@@ -525,7 +525,13 @@ export class UIManager {
   /** @returns {boolean} vrai si le secteur a été pris en charge par le mode scan. */
   _tryScan(regionId) {
     const R = this.game.regions;
-    if (!R || regionId == null || R.discovered?.[regionId]) return false;
+    if (!R || regionId == null) return false;
+    if (R.discovered?.[regionId]) {
+      // En mode scan la fiche est masquée : sans ce retour, l'appui semblerait
+      // n'avoir aucun effet.
+      this._flash('Secteur ' + regionId + NB + '· déjà cartographié');
+      return false;
+    }
     const ok = this.game.scanRegion(regionId);
     if (!ok) {
       this.notifications.push({ text: 'Scan impossible : ressources insuffisantes.', kind: 'warn', icon: '⚠' });

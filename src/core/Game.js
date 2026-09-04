@@ -421,6 +421,7 @@ export class Game {
     const id = techId ?? s.tech.current;
     const t = TECHNOLOGIES[id];
     if (!t) return null;
+    if (s.tech.unlocked.includes(id)) return 0;
     const rate = this._researchSystem()?.rate() ?? 0;
     if (!(rate > 0)) return null;
     const done = (id === s.tech.current) ? (s.tech.progress || 0) : 0;

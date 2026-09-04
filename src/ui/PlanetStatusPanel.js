@@ -122,12 +122,12 @@ export class PlanetStatusPanel {
       const on_ = !!this.game.autoExplore;
       this.autoBtn.classList.toggle('is-active', on_);
       this.autoBtn.setAttribute('aria-pressed', on_ ? 'true' : 'false');
-      setText(this.autoBtn.firstChild, on_ ? 'Exploration automatique : active' : 'Exploration automatique');
+      setText(this.autoBtn.firstChild, on_ ? 'Exploration automatique : active' : 'Exploration automatique');
     }
     const scanning = this.ui?.scanMode === true;
     this.scanBtn.classList.toggle('is-active', scanning);
     this.scanBtn.setAttribute('aria-pressed', scanning ? 'true' : 'false');
-    setText(this.scanBtn.firstChild, scanning ? 'Mode scan continu : actif' : 'Mode scan continu');
+    setText(this.scanBtn.firstChild, scanning ? 'Mode scan continu : actif' : 'Mode scan continu');
 
     let report = [];
     try { report = this.game.victoryReport() || []; } catch (err) { console.warn('[PlanetStatus]', err); }

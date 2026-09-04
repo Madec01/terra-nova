@@ -6,6 +6,9 @@
  *  - `apply(ctx)`  : applique l'effet, retourne { title, text, kind, regionId? }
  *
  * ctx = { state, regions, rng, bus, helpers }
+ *
+ * IMPORTANT : tout aléa doit passer par `ctx.rng` (générateur semé). Aucun
+ * `Math.random()` ici, sous peine de casser le déterminisme par seed.
  * helpers : { randomRegion(filter), discoveredRegions(), addResource(k,v),
  *             addGlobal(k,v), damageBuilding(), notify() }
  *
@@ -93,8 +96,12 @@ export const GAME_EVENTS = [
     id: 'breakdown',
     name: 'Panne en cascade',
     weight: ({ state }) => (state.globals.stability < 55 && state.buildings.length >= 6 ? 8 : 2),
-    apply: ({ state, helpers }) => {
-      const affected = state.buildings.filter(() => Math.random() < 0.22);
+    apply: ({ state, rng, helpers }) => {
+      /* `rng` et non Math.random : le déterminisme par seed est un pilier du
+         jeu. Une seule source non semée suffisait à rendre deux parties
+         lancées avec la même seed divergentes — et la sonde d'équilibrage
+         non reproductible. */
+      const affected = state.buildings.filter(() => rng.next() < 0.22);
       affected.forEach((b) => { b.downtime = 45; });
       if (!affected.length) return null;
       return {

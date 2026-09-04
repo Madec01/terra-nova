@@ -59,7 +59,9 @@ function boot() {
     scene.syncBuildings(game.state);
     const site = game.regions?.landingSite;
     if (Number.isInteger(site) && site >= 0 && site < game.regions.count) {
-      scene.focusRegion(site);
+      // Cadrage d'ouverture : montrer la planète ET situer le site dessus,
+      // et non zoomer au ras du sol (voir BALANCE.render.startFitRatio).
+      scene.focusRegion(site, BALANCE.render.startFitRatio);
       game.selectRegion(site);
     } else {
       scene.setSelected(null);

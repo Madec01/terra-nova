@@ -1,6 +1,14 @@
 /**
  * Contrôle de jouabilité sur TÉLÉPHONE.
  *
+ * Le parcours joué au doigt, dans l'ordre : démarrer une partie depuis
+ * l'accueil, sélectionner un secteur sur le globe, lire sa fiche réduite, la
+ * déplier puis la replier, lancer un scan orbital, ouvrir la feuille de
+ * construction, poser un bâtiment en appuyant sur la planète, ouvrir la
+ * recherche, changer de couche, refermer une feuille par appui à côté,
+ * changer la vitesse du temps, ouvrir la décomposition de la température,
+ * la refermer, ouvrir le menu, lire le bilan planétaire.
+ *
  * Ouvre le jeu dans un vrai contexte tactile (pas seulement une fenêtre
  * étroite : `hasTouch`, `isMobile`, densité de pixels réaliste), JOUE UNE
  * PARTIE AU DOIGT — uniquement avec `page.touchscreen.tap()`, jamais avec
@@ -159,7 +167,8 @@ async function tap(page, selector, { optional = false, index = 0 } = {}) {
     if (optional) return false;
     throw new Error(`introuvable : ${selector}`);
   }
-  try { await el.scrollIntoViewIfNeeded({ timeout: 2000 }); } catch { /* pas défilable */ }
+  try { await el.evaluate((e) => e.scrollIntoView({ block: 'center', inline: 'center' })); } catch { /* ignore */ }
+  await page.waitForTimeout(150);
   const box = await el.boundingBox();
   if (!box) {
     if (optional) return false;
@@ -176,10 +185,48 @@ async function tap(page, selector, { optional = false, index = 0 } = {}) {
   return true;
 }
 
-/** Appuie sur le globe (au centre, ou sur un secteur donné si visible). */
-async function tapPlanet(page, prof, dx = 0, dy = 0) {
-  await page.touchscreen.tap(prof.width / 2 + dx, prof.height / 2 + dy);
-  await page.waitForTimeout(400);
+/**
+ * Appuie sur le GLOBE, à un point qui touche réellement la planète et qui
+ * n'est pas recouvert par l'interface. `scene.pick()` sert d'œil (savoir ce
+ * qu'il y a sous le pixel), comme dans `tools/playtest.mjs` ; l'appui lui-même
+ * est un vrai geste tactile.
+ */
+async function tapPlanet(page, avoid = null) {
+  const pt = await page.evaluate((skip) => {
+    const xs = [0.5, 0.38, 0.62, 0.44, 0.56, 0.7];
+    const ys = [0.42, 0.32, 0.25, 0.5, 0.55, 0.2];
+    for (const fy of ys) {
+      for (const fx of xs) {
+        const x = Math.round(window.innerWidth * fx);
+        const y = Math.round(window.innerHeight * fy);
+        const el = document.elementFromPoint(x, y);
+        if (!el || el.tagName !== 'CANVAS') continue;
+        try {
+          const id = window.TERRA.scene.pick(x, y);
+          if (id != null && (skip === null || id !== skip)) return [x, y];
+        } catch { /* ignore */ }
+      }
+    }
+    return null;
+  }, avoid);
+  if (!pt) return false;
+  await page.touchscreen.tap(pt[0], pt[1]);
+  await page.waitForTimeout(450);
+  return true;
+}
+
+/** Amène un secteur au centre de la vue, puis l'atteint au doigt. */
+async function reachRegion(page, id) {
+  await page.evaluate((r) => window.TERRA.scene.focusRegion(r), id);
+  await page.waitForTimeout(1600);
+  for (let i = 0; i < 3; i++) {
+    if (await tapPlanet(page)) {
+      const sel = await page.evaluate(() => window.TERRA.game.selectedRegion);
+      if (sel === id) return true;
+    }
+    await page.waitForTimeout(500);
+  }
+  return false;
 }
 
 async function walkthrough(page, prof, shot) {
@@ -223,8 +270,8 @@ async function walkthrough(page, prof, shot) {
     // on referme sa fiche au doigt avant de viser un autre secteur.
     await tap(page, '.tn-region button[aria-label="Fermer la fiche du secteur"]', { optional: true });
     const before = await page.evaluate(() => window.TERRA.game.selectedRegion);
-    for (const [dx, dy] of [[0, 0], [-40, 30], [50, -30], [0, 60], [70, 70]]) {
-      await tapPlanet(page, prof, dx, dy);
+    for (let i = 0; i < 4; i++) {
+      if (!(await tapPlanet(page, before))) continue;
       const id = await page.evaluate(() => window.TERRA.game.selectedRegion);
       if (id != null && id !== before) return 'secteur ' + id;
     }
@@ -244,32 +291,39 @@ async function walkthrough(page, prof, shot) {
   });
 
   await step('déplier puis replier la fiche', async () => {
+    const state = () => page.evaluate(() => {
+      const p = document.querySelector('.tn-region');
+      return p && !p.hidden ? !p.classList.contains('is-peek') : null;
+    });
     const grab = '.tn-region .tn-sheet-grab';
-    if (!(await tap(page, grab, { optional: true }))) {
-      if (!(await tap(page, '.tn-region .tn-collapse', { optional: true }))) return 'sans objet (paysage)';
+    const before = await state();
+    if (before === null) throw new Error('la fiche n’est pas ouverte');
+    const land = await page.evaluate(() => document.documentElement.classList.contains('tn-phone-land'));
+    if (land) return 'sans objet en paysage : la fiche latérale affiche tout';
+    const hit = await tap(page, grab, { optional: true })
+      || await tap(page, '.tn-region .tn-collapse', { optional: true });
+    if (!hit) throw new Error('aucune poignée ni bouton de repli');
+    const mid = await state();
+    if (mid === before) throw new Error('l’appui sur la poignée ne change rien');
+    // On termine repliée : la planète doit rester visible et atteignable.
+    if (mid === true) {
+      await tap(page, grab, { optional: true }) || await tap(page, '.tn-region .tn-collapse', { optional: true });
     }
-    const open = await page.evaluate(() => !document.querySelector('.tn-region').classList.contains('is-peek'));
-    return open ? 'dépliée' : 'repliée';
+    return before ? 'repliée puis dépliée' : 'dépliée puis repliée';
   });
 
   await step('lancer un scan orbital', async () => {
-    // On cherche un secteur non cartographié, puis on l'atteint au doigt via
-    // la sélection courante ; à défaut on utilise la fiche déjà ouverte.
-    const undiscovered = await page.evaluate(() => {
+    const target = await page.evaluate(() => {
       const g = window.TERRA.game;
       const id = g.selectedRegion;
-      return id != null && !g.regions.discovered[id];
+      if (id != null && !g.regions.discovered[id]) return id;
+      for (let i = 0; i < g.regions.count; i++) if (!g.regions.discovered[i]) return i;
+      return -1;
     });
-    if (!undiscovered) {
-      // Amener un secteur inconnu sous le doigt : on centre la caméra dessus.
-      await page.evaluate(() => {
-        const g = window.TERRA.game;
-        for (let i = 0; i < g.regions.count; i++) {
-          if (!g.regions.discovered[i]) { window.TERRA.scene.focusRegion(i); return; }
-        }
-      });
-      await page.waitForTimeout(1400);
-      await tapPlanet(page, prof);
+    if (target < 0) throw new Error('aucun secteur inconnu');
+    const sel = await page.evaluate(() => window.TERRA.game.selectedRegion);
+    if (sel !== target && !(await reachRegion(page, target))) {
+      throw new Error('impossible d’atteindre un secteur inconnu au doigt');
     }
     const before = await page.evaluate(() => (window.TERRA.game.state.explore.scanning?.length ?? 0)
       + (window.TERRA.game.state.explore.queue?.length ?? 0));
@@ -277,16 +331,15 @@ async function walkthrough(page, prof, shot) {
     const n = await btns.count();
     for (let i = 0; i < n; i++) {
       const t = (await btns.nth(i).textContent() || '');
-      if (/scan orbital/i.test(t)) {
-        const b = await btns.nth(i).boundingBox();
-        if (!b) continue;
-        await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
-        await page.waitForTimeout(500);
-        const after = await page.evaluate(() => (window.TERRA.game.state.explore.scanning?.length ?? 0)
-          + (window.TERRA.game.state.explore.queue?.length ?? 0));
-        if (after <= before) throw new Error('le bouton n’a lancé aucun scan');
-        return `${after} scan(s) en cours ou en file`;
-      }
+      if (!/scan orbital/i.test(t)) continue;
+      const b = await btns.nth(i).boundingBox();
+      if (!b) continue;
+      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+      await page.waitForTimeout(500);
+      const after = await page.evaluate(() => (window.TERRA.game.state.explore.scanning?.length ?? 0)
+        + (window.TERRA.game.state.explore.queue?.length ?? 0));
+      if (after <= before) throw new Error('le bouton n’a lancé aucun scan');
+      return `${after} scan(s) en cours ou en file`;
     }
     throw new Error('bouton de scan introuvable dans la fiche');
   });
@@ -321,17 +374,34 @@ async function walkthrough(page, prof, shot) {
     // 1. choisir la carte dans la feuille (au doigt)
     const card = page.locator(`.tn-card[data-type="${type}"]`);
     if (!(await card.count())) throw new Error(`carte « ${type} » absente`);
+    // La liste défile : on amène la carte dans la feuille avant d'appuyer,
+    // puis on VÉRIFIE que le point visé touche bien la carte.
+    await card.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+    await page.waitForTimeout(250);
     const b = await card.boundingBox();
-    if (!b) throw new Error('carte hors écran');
-    await page.touchscreen.tap(b.x + b.width / 2, b.y + Math.min(28, b.height / 2));
+    if (!b) throw new Error('carte introuvable à l’écran');
+    const cx = b.x + b.width / 2;
+    const pt = await page.evaluate(([x, ys, t]) => {
+      for (const y of ys) {
+        const e = document.elementFromPoint(x, y);
+        if (e && e.closest(`.tn-card[data-type="${t}"]`) && !e.closest('.tn-card-info')) return y;
+      }
+      return null;
+    }, [cx, [b.y + 24, b.y + b.height / 2, b.y + 8, b.y + b.height - 8], type]);
+    if (pt === null) {
+      throw new Error(`la carte n'est pas atteignable au doigt (y ≈ ${Math.round(b.y)} pour ${page.viewportSize().height})`);
+    }
+    await page.touchscreen.tap(cx, pt);
     await page.waitForTimeout(400);
     const placing = await page.evaluate(() => window.TERRA.ui.placingType);
     if (placing !== type) throw new Error('le mode placement ne démarre pas');
 
-    // 2. amener la cible sous le doigt et appuyer sur le globe
-    await page.evaluate((id) => window.TERRA.scene.focusRegion(id), target);
-    await page.waitForTimeout(1400);
-    await tapPlanet(page, prof);
+    // 2. amener la cible sous le doigt et appuyer VRAIMENT dessus : viser le
+    //    globe au hasard peut atteindre un secteur voisin non cartographié,
+    //    et le placement est alors refusé — ce n'est pas ce qu'on mesure ici.
+    if (!(await reachRegion(page, target))) {
+      throw new Error('impossible d’atteindre le secteur visé au doigt');
+    }
     const after = await page.evaluate(() => window.TERRA.game.state.buildings.length);
     if (after <= before) throw new Error('aucun bâtiment posé après appui sur le globe');
     return `${type} : ${after - before} installation posée par appui sur la planète`;
@@ -355,8 +425,11 @@ async function walkthrough(page, prof, shot) {
     for (let i = 0; i < n; i++) {
       const id = await layers.nth(i).getAttribute('data-layer');
       if (id === before) continue;
+      await layers.nth(i).evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      await page.waitForTimeout(150);
       const box = await layers.nth(i).boundingBox();
-      if (!box) continue;
+      const vp = page.viewportSize();
+      if (!box || box.y + box.height / 2 > vp.height || box.y < 0) continue;
       await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
       await page.waitForTimeout(300);
       const after = await page.evaluate(() => window.TERRA.ui.panels.layers.current);
@@ -368,7 +441,8 @@ async function walkthrough(page, prof, shot) {
   await shot('07-couches');
 
   await step('fermer la feuille par appui à côté', async () => {
-    const open = await page.evaluate(() => !!window.TERRA.ui.activePanel);
+    let open = await page.evaluate(() => !!window.TERRA.ui.activePanel);
+    if (!open) { await tap(page, '.tn-tab[data-tab="layers"]'); open = await page.evaluate(() => !!window.TERRA.ui.activePanel); }
     if (!open) throw new Error('aucune feuille ouverte');
     await page.touchscreen.tap(prof.width / 2, Math.round(prof.height * 0.28));
     await page.waitForTimeout(300);
@@ -436,6 +510,20 @@ async function walkthrough(page, prof, shot) {
     if (!ok) throw new Error('l’onglet Menu n’ouvre rien');
     await tap(page, '.tn-tab[data-tab="log"]');   // referme
     return 'journal et sauvegardes accessibles';
+  });
+
+  // Laissée ouverte : la mesure finale doit AUSSI porter sur le contenu d'une
+  // feuille, pas seulement sur l'écran nu.
+  await step('lire le bilan planétaire', async () => {
+    await tap(page, '.tn-tab[data-tab="planet"]');
+    const info = await page.evaluate(() => ({
+      active: window.TERRA.ui.activePanel,
+      rows: document.querySelectorAll('.tn-row--victory').length,
+      explore: (document.querySelector('.tn-explore-line')?.textContent || '').trim(),
+    }));
+    if (info.active !== 'planet') throw new Error('l’onglet Planète n’ouvre rien');
+    if (info.rows < 3) throw new Error('les conditions de victoire ne s’affichent pas');
+    return `${info.rows} conditions · ${info.explore}`;
   });
 
   return steps;

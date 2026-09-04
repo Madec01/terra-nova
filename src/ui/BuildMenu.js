@@ -43,7 +43,7 @@ export class BuildMenu {
   build() {
     clear(this.node);
     this.cards.clear();
-    this.node.appendChild(el('p', { class: 'tn-hint', text: 'Choisissez une installation, puis cliquez sur un secteur cartographié de la planète.' }));
+    this.node.appendChild(el('p', { class: 'tn-hint', text: 'Choisissez une installation, puis désignez un secteur cartographié de la planète.' }));
 
     for (const cat of BUILDING_CATEGORIES) {
       const defs = Object.values(BUILDINGS).filter((b) => b.category === cat.id);
@@ -96,7 +96,7 @@ export class BuildMenu {
         // Un bouton qui ne répond pas est perçu comme cassé : on dit pourquoi.
         const techId = def.requires?.tech;
         this.game.bus?.emit('notify', {
-          text: `${def.name} requiert la technologie « ${TECHNOLOGIES[techId]?.name ?? techId} ».`,
+          text: `${def.name} requiert la technologie « ${TECHNOLOGIES[techId]?.name ?? techId} ».`,
           kind: 'warn', icon: '⌬',
         });
         this.ui?.openPanel?.('research');

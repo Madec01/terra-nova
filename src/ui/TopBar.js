@@ -265,12 +265,12 @@ export class TopBar {
         rows.push(tipRow('Écart à combler', formatSigned(gap, 2) + totalUnit, gap));
         const perYear = 1 - Math.pow(1 - (BALANCE.climate?.inertia ?? 0), 365);
         rows.push(tipRow('Vitesse de convergence', (perYear * 100).toFixed(0) + NB + '%' + NB + 'de l’écart/an', 0));
-        rows.push(tipNote('La valeur affichée poursuit l’équilibre sans jamais l’atteindre d’un coup : agir déplace d’abord l’équilibre, la planète suit ensuite.'));
+        rows.push(tipNote('La valeur affichée poursuit l’équilibre sans jamais l’atteindre d’un coup : agir déplace d’abord l’équilibre, la planète suit ensuite.'));
       } else {
         rows.push(tipRow('Total', formatSigned(total, 2) + totalUnit, total, 'is-total'));
       }
       if (def.key === 'oxygen') {
-        rows.push(tipNote('Les lignes ci-dessus décrivent le réservoir d’O₂ en kPa/an ; la valeur en tête est sa part dans l’atmosphère.'));
+        rows.push(tipNote('Les lignes ci-dessus décrivent le réservoir d’O₂ en kPa/an ; la valeur en tête est sa part dans l’atmosphère.'));
       }
     } else if (def.contrib) {
       rows.push(tipSep());

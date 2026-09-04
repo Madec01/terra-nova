@@ -210,10 +210,18 @@ export const BALANCE = {
     growthRate: 0.0060,
     /** Vitesse de dépérissement en conditions hostiles. */
     decayRate: 0.014,
-    /** Propagation vers les régions voisines (fraction par jour). */
-    spreadRate: 0.0030,
-    /** Seuil de végétation à partir duquel une région essaime. */
-    spreadThreshold: 0.25,
+    /** Propagation vers les régions voisines (fraction par jour).
+     *  Abaissée de 0,0030 à 0,0027 : la propagation NATURELLE suffisait à
+     *  verdir la planète, ce qui rendait les tours d'ensemencement purement
+     *  décoratives (sonde d'ablation : aucun écart). La conquête d'un
+     *  continent redevient un investissement, pas une conséquence. */
+    spreadRate: 0.0027,
+    /** Seuil de végétation à partir duquel une région essaime.
+     *  Relevé de 0,25 à 0,40 : seule une région DÉJÀ mûre essaime toute seule.
+     *  Sans cela, la propagation naturelle verdissait la planète en trente ans
+     *  quoi que fasse le joueur, et les tours d'ensemencement — qui poussent
+     *  directement dans le voisinage — ne servaient à rien. */
+    spreadThreshold: 0.40,
     /** Conversion végétation régionale → indice de biomasse global (0..100). */
     globalScale: 100,
     /** Pénalité de croissance due à la pollution. */
@@ -341,9 +349,10 @@ export const BALANCE = {
   /*  EXPLORATION                                                          */
   /* --------------------------------------------------------------------- */
   /*  Un scan ne révèle plus UNE cellule mais une ZONE : la cible, tout le
-   *  premier anneau de voisins, et une partie du second. La cartographie
-   *  complète d'une partie gagnée passe ainsi de ~313 scans à moins de 80,
-   *  sans que le scan devienne gratuit — il coûte de l'énergie ET des
+   *  premier anneau de voisins, et une partie du second. Une partie gagnée
+   *  passe ainsi de 313 scans à une soixantaine — et le joueur n'a plus besoin
+   *  de cartographier le globe entier (≈ 56 % suffisent) pour avoir le choix
+   *  de ses emplacements. Le tout sans que le scan devienne gratuit — il coûte de l'énergie ET des
    *  matériaux, donc il se dispute les mêmes ressources que la construction.
    *  Les sondes restent rares : viser une anomalie ou une zone riche plutôt
    *  que la case d'à côté reste la vraie décision.                          */
@@ -363,7 +372,9 @@ export const BALANCE = {
     /**
      * Probabilité de révélation par ANNEAU autour de la cible.
      * [0] = voisins directs, [1] = voisins des voisins…
-     * 1 + 6×1,0 + 12×0,45 ≈ 12 secteurs par scan.
+     * 1 + 6×1,0 + 12×0,45 ≈ 12 secteurs par scan sur une carte déjà entamée,
+     * jusqu'à 19 en terrain vierge. Mesuré : une partie gagnée demande une
+     * soixantaine de scans, contre 313 avant.
      */
     zoneRings: [1.0, 0.45],
     /** Longueur maximale de la file d'attente des scans. */
@@ -439,8 +450,14 @@ export const BALANCE = {
        entre 18 et 24 % selon la seed : c'est la condition la plus dépendante
        du monde tiré, donc celle qu'il ne faut PAS serrer davantage. */
     waterCoverage: { min: 0.18 },
-    biomass: { min: 68 },
-    population: { min: 52000 },
+    biomass: { min: 63 },
+    /* La population finale varie d'un facteur 5 selon le monde tiré (18 k à
+       93 k) : elle dépend du nombre de régions réellement habitables. 42 000
+       se calait dans le haut de cette dispersion, laissant peu de marge aux
+       seeds moyennes ; l'abaisser à 26 000 n'a en revanche fait gagner aucune
+       seed supplémentaire, seulement rendu la condition non contraignante.
+       35 000 garde la condition mordante tout en laissant une marge réelle. */
+    population: { min: 35000 },
     stability: { min: 90 },
     /**
      * Le climat doit avoir CESSÉ DE DÉRIVER (°C/an en valeur absolue).
@@ -477,6 +494,21 @@ export const BALANCE = {
     cameraMinDistance: 1.35,
     cameraMaxDistance: 6.0,
     cameraStartDistance: 3.2,
+    /**
+     * Distances de cadrage, exprimées en FRACTION de la distance à laquelle la
+     * planète entière tient à l'écran — et non en valeur absolue : celle-ci
+     * dépend de la forme de l'écran, et un réglage correct sur un moniteur
+     * donnait un zoom si serré sur un téléphone en portrait qu'on ne voyait
+     * plus que trois ou quatre hexagones.
+     *
+     * Deux besoins distincts, longtemps confondus dans un seul réglage :
+     *  - `startFitRatio` : cadrage d'ouverture de partie. Le joueur doit voir
+     *    SA PLANÈTE et situer son site d'atterrissage dessus.
+     *  - `focusFitRatio` : « emmène-moi voir cette région » (clic sur une
+     *    notification, bouton de centrage). Là, on se rapproche vraiment.
+     */
+    startFitRatio: 0.98,
+    focusFitRatio: 0.60,
     rotationDamping: 0.90,
     rotationSpeed: 0.0055,
     zoomSpeed: 0.0016,

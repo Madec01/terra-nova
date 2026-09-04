@@ -5,10 +5,13 @@
  *   node tools/balance-probe.mjs [seed] [annees]
  *   node tools/balance-probe.mjs --multi [n] [annees]   (n seeds, résumé compact)
  *   node tools/balance-probe.mjs --bad   [n] [annees]   (joueur imprudent : doit perdre)
- *   node tools/balance-probe.mjs --ablate [seed] [annees]
+ *   node tools/balance-probe.mjs --ablate [seeds] [annees]
  *        retire un bâtiment (ou une branche technologique) à la fois et
  *        compare la date de victoire : c'est le test « ce contenu sert-il à
  *        quelque chose ? ». Un écart nul = du décor, à corriger ou à supprimer.
+ *        Les événements planétaires étant aléatoires, chaque scénario est
+ *        rejoué sur PLUSIEURS seeds : un verdict tiré d'une seule partie
+ *        oscillait entre « inutile » et « indispensable » d'un tirage à l'autre.
  *
  * Ce n'est PAS un test de régression : c'est un outil de game design pour
  * répondre à « la partie est-elle gagnable, et en combien de temps ? ».
@@ -64,7 +67,7 @@ const WANT = {
   mine: 6, refinery: 3, depot: 3, solar: 6, geothermal: 5, fusion: 3,
   science_station: 5, ice_extractor: 6, ghg_factory: 6, atmo_processor: 7,
   o2_generator: 6, polar_melter: 4, orbital_mirror: 8, climate_stabilizer: 3,
-  biodome: 6, seeder: 5, colony: 6,
+  biodome: 4, seeder: 5, colony: 6,
 };
 
 /**
@@ -421,30 +424,44 @@ const ABLATIONS = [
   { label: 'branche BIOLOGIE amputée (écosystèmes)', remove: ['ecosystems'] },
 ];
 
-function printAblation(seed, years) {
-  console.log(`\nSONDE D'ABLATION — seed ${seed}, ${years} ans`);
+function printAblation(seeds, years) {
+  console.log(`\nSONDE D'ABLATION — ${seeds} seeds, ${years} ans`);
   console.log('  Un contenu dont le retrait ne change RIEN est du décor.\n');
-  console.log('  scénario                                 victoire   bât  scans     T°C     bio      pop  écart');
-  console.log('  ' + '─'.repeat(100));
+  console.log('  scénario                                 victoires   an moyen   bât  scans  écart');
+  console.log('  ' + '─'.repeat(92));
   let ref = null;
   for (const a of ABLATIONS) {
-    const run = playGame(seed, years, false, a.remove);
-    const g = run.state.globals;
-    const year = run.victoryDay !== null ? run.victoryDay / 365 : null;
-    if (ref === null && year !== null) ref = year;
-    const delta = year === null ? 'PERDU'
-      : (ref === null ? '—' : (year - ref >= 0 ? '+' : '') + (year - ref).toFixed(1) + ' an');
-    const bat = run.atVictory ? String(run.atVictory.buildings).padStart(4) : '   —';
-    const sc = run.atVictory ? String(run.atVictory.scans).padStart(5) : '    —';
-    console.log(`  ${a.label.padEnd(40)} ${(year !== null ? 'an ' + year.toFixed(1) : '—').padStart(9)}`
-      + ` ${bat} ${sc} ${f(g.temperature)} ${f(g.biomass, 1)} ${String(Math.round(g.population)).padStart(8)}  ${delta}`);
+    let wins = 0, sumYear = 0, sumBat = 0, sumScan = 0;
+    for (let k = 0; k < seeds; k++) {
+      const run = playGame(1000 + k * 7919, years, false, a.remove);
+      if (run.victoryDay !== null) {
+        wins++;
+        sumYear += run.victoryDay / 365;
+        sumBat += run.atVictory.buildings;
+        sumScan += run.atVictory.scans;
+      }
+    }
+    const year = wins ? sumYear / wins : null;
+    if (ref === null) ref = { wins, year };
+    // Un contenu utile se juge D'ABORD au nombre de victoires perdues, et
+    // seulement ensuite au retard infligé.
+    const lost = ref.wins - wins;
+    const delta = lost > 0
+      ? `${lost} victoire(s) perdue(s)`
+      : (year !== null && ref.year !== null
+        ? ((year - ref.year >= 0 ? '+' : '') + (year - ref.year).toFixed(1) + ' an')
+        : '—');
+    console.log(`  ${a.label.padEnd(40)} ${String(wins + '/' + seeds).padStart(9)}`
+      + ` ${(year !== null ? 'an ' + year.toFixed(1) : '—').padStart(10)}`
+      + ` ${(wins ? (sumBat / wins).toFixed(0) : '—').padStart(5)}`
+      + ` ${(wins ? (sumScan / wins).toFixed(0) : '—').padStart(6)}  ${delta}`);
   }
   console.log();
 }
 
 const arg0 = process.argv[2];
 if (arg0 === '--ablate') {
-  printAblation(Number(process.argv[3] ?? 20260904), Number(process.argv[4] ?? 60));
+  printAblation(Number(process.argv[3] ?? 3), Number(process.argv[4] ?? 55));
 } else if (arg0 === '--multi') {
   printMulti(Number(process.argv[3] ?? 6), Number(process.argv[4] ?? 60));
 } else if (arg0 === '--bad') {
