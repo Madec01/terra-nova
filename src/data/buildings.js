@@ -142,7 +142,7 @@ export const BUILDINGS = {
     upkeep: { energy: 8.0 },
     produces: {},
     requires: { tech: 'atmospheric_engineering' },
-    global: { pressure: 0.019, co2: 0.0025 },
+    global: { pressure: 0.0022, co2: 0.0006 },
     maxPerRegion: 1,
     outputScale: (r) => 0.7 + r.geothermal * 0.9,
   },
@@ -154,7 +154,7 @@ export const BUILDINGS = {
     upkeep: { energy: 12 },
     produces: {},
     requires: { tech: 'carbon_capture' },
-    global: { oxygen: 0.0125, co2: -0.0135, stability: 0.0004 },
+    global: { oxygen: 0.0100, co2: -0.0045, stability: 0.0004 },
     maxPerRegion: 1,
   },
 
@@ -177,7 +177,7 @@ export const BUILDINGS = {
     upkeep: { energy: 3.0 },
     produces: {},
     requires: { tech: 'orbital_infrastructure' },
-    global: { insolation: 0.00055 },
+    global: { insolation: 0.00001 },   // cumulatif : 8 miroirs ≈ +0,03 d'ensoleillement par an
     maxPerRegion: 1,
     maxTotal: 8,
     orbital: true,

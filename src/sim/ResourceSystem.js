@@ -14,7 +14,7 @@
  * fonctionnement (BALANCE.power.brownoutFloor).
  */
 import { BALANCE } from '../data/balance.js';
-import { clamp, clamp01 } from '../utils/math.js';
+import { clamp } from '../utils/math.js';
 
 /** Fréquence maximale des avertissements de pénurie (jours). */
 const SHORTAGE_COOLDOWN_DAYS = 200;
@@ -31,9 +31,16 @@ export class ResourceSystem {
     this._keys = ['energy', 'materials', 'science', 'biomass', 'water'];
   }
 
-  reset() {
+  reset(ctx) {
     this._lastShortage = -Infinity;
     this._sinceChange = 0;
+    // L'accumulateur de Game est réutilisé d'une partie à l'autre : on purge
+    // le canal différé pour ne pas hériter des flux de la partie précédente.
+    const acc = ctx && ctx.acc;
+    if (acc && acc.deferred) {
+      for (const k in acc.deferred.produce) acc.deferred.produce[k] = 0;
+      for (const k in acc.deferred.consume) acc.deferred.consume[k] = 0;
+    }
   }
 
   tick(ctx) {
@@ -44,6 +51,13 @@ export class ResourceSystem {
     const deferred = acc.deferred;
     const dProduce = deferred ? deferred.produce : null;
     const dConsume = deferred ? deferred.consume : null;
+
+    // Le détail « d'où vient mon énergie » (rempli par BuildingSystem) est
+    // recopié dans l'état pour que l'interface y ait accès.
+    const energyRows = state.contributions.energy;
+    energyRows.length = 0;
+    const src = acc.contributions.energy;
+    for (let i = 0; i < src.length; i++) energyRows.push(src[i]);
 
     /* --- Capacités de stockage ------------------------------------------ */
     const cap = state.capacity;

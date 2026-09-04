@@ -1,0 +1,372 @@
+@import './panels.css';
+
+/* ==========================================================================
+   TERRA NOVA — socle : variables, reset, typographie, disposition générale
+   Direction artistique : terminal scientifique, dense, sobre, angles droits.
+   ========================================================================== */
+
+:root {
+  /* --- palette ---------------------------------------------------------- */
+  --tn-bg:        #080b11;
+  --tn-bg-2:      #0c111a;
+  --tn-panel:     rgba(14, 20, 29, 0.86);
+  --tn-panel-2:   rgba(19, 27, 38, 0.92);
+  --tn-line:      #1e2a38;
+  --tn-line-2:    #2b3d52;
+  --tn-text:      #c9d6e4;
+  --tn-dim:       #7b8da3;
+  --tn-accent:    #5fd3e8;
+  --tn-accent-2:  #8fb4d9;
+  --tn-ok:        #5fd39a;
+  --tn-warn:      #e0a34a;
+  --tn-danger:    #e05a5a;
+  --tn-dev:       #e08a3c;
+
+  --tn-accent-soft: rgba(95, 211, 232, 0.12);
+  --tn-accent-line: rgba(95, 211, 232, 0.42);
+  --tn-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+  /* --- typographie ------------------------------------------------------ */
+  --tn-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --tn-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* --- métriques -------------------------------------------------------- */
+  --tn-top-h: 58px;
+  --tn-rail: 46px;
+  --tn-panel-w: 300px;
+  --tn-gap: 10px;
+  --tn-cut: 9px;
+  --tn-tap: 28px;
+
+  --tn-fast: 130ms;
+  --tn-slow: 200ms;
+
+  color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------- */
+/*  Reset minimal                                                        */
+/* --------------------------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--tn-bg);
+  color: var(--tn-text);
+  font-family: var(--tn-sans);
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+body { touch-action: none; }
+
+/* Indispensable : nos composants posent `display: flex`, ce qui l'emporterait
+   sur la règle `[hidden] { display: none }` du navigateur. */
+[hidden] { display: none !important; }
+
+h1, h2, h3, p, figure { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+::selection { background: var(--tn-accent-line); color: #04070c; }
+
+/* Canvas de la planète : plein écran, sous l'interface. */
+body > canvas,
+#app > canvas,
+#scene, #canvas,
+canvas.tn-scene {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  touch-action: none;
+}
+
+/* --------------------------------------------------------------------- */
+/*  Barres de défilement                                                 */
+/* --------------------------------------------------------------------- */
+
+.tn-ui * { scrollbar-width: thin; scrollbar-color: var(--tn-line-2) transparent; }
+.tn-ui *::-webkit-scrollbar { width: 8px; height: 8px; }
+.tn-ui *::-webkit-scrollbar-track { background: transparent; }
+.tn-ui *::-webkit-scrollbar-thumb { background: var(--tn-line-2); border: 2px solid transparent; background-clip: padding-box; }
+.tn-ui *::-webkit-scrollbar-thumb:hover { background: var(--tn-accent-line); background-clip: padding-box; }
+
+/* --------------------------------------------------------------------- */
+/*  Racine de l'interface                                                */
+/* --------------------------------------------------------------------- */
+
+.tn-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  color: var(--tn-text);
+  font-size: 12px;
+}
+
+.tn-ui > * { pointer-events: auto; }
+
+/* Curseur de visée pendant le placement d'un bâtiment. */
+.tn-ui.is-placing { cursor: crosshair; }
+
+/* --- typographie utilitaire ------------------------------------------- */
+
+.tn-section-title {
+  font-family: var(--tn-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tn-dim);
+  padding: 12px 0 6px;
+  border-bottom: 1px solid var(--tn-line);
+  margin-bottom: 8px;
+}
+
+.tn-hint {
+  font-size: 11px;
+  color: var(--tn-dim);
+  line-height: 1.5;
+  margin: 4px 0 8px;
+}
+
+.tn-dim { color: var(--tn-dim); }
+
+.tn-num, .tn-mono { font-family: var(--tn-mono); font-variant-numeric: tabular-nums; }
+
+/* --------------------------------------------------------------------- */
+/*  Disposition                                                          */
+/* --------------------------------------------------------------------- */
+
+.tn-topbar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  min-height: var(--tn-top-h);
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: var(--tn-gap);
+  padding: 6px var(--tn-gap);
+  background: linear-gradient(180deg, rgba(8, 11, 17, 0.94) 0%, rgba(8, 11, 17, 0.72) 70%, rgba(8, 11, 17, 0) 100%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--tn-line);
+}
+
+.tn-left {
+  position: absolute;
+  left: var(--tn-gap);
+  top: calc(var(--tn-top-h) + var(--tn-gap));
+  bottom: 84px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--tn-gap);
+  pointer-events: none;
+  max-width: calc(100vw - 2 * var(--tn-gap));
+}
+.tn-left > * { pointer-events: auto; }
+
+.tn-region {
+  position: absolute;
+  right: var(--tn-gap);
+  top: calc(var(--tn-top-h) + var(--tn-gap));
+  width: var(--tn-panel-w);
+  max-height: calc(100% - var(--tn-top-h) - 100px);
+  display: flex;
+  flex-direction: column;
+}
+
+.tn-center-stack {
+  position: absolute;
+  bottom: 66px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  max-width: min(560px, calc(100vw - 2 * var(--tn-gap)));
+}
+.tn-center-stack > *:not([hidden]) { pointer-events: auto; }
+
+.tn-timebar {
+  position: absolute;
+  bottom: var(--tn-gap);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tn-notifs {
+  position: absolute;
+  right: var(--tn-gap);
+  bottom: var(--tn-gap);
+  width: 304px;
+  max-width: calc(100vw - 2 * var(--tn-gap));
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 30;
+}
+.tn-notifs > * { pointer-events: auto; }
+
+.tn-debug {
+  position: absolute;
+  left: calc(var(--tn-rail) + 2 * var(--tn-gap));
+  bottom: 84px;
+  width: 320px;
+  max-width: calc(100vw - 2 * var(--tn-gap));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 40;
+}
+
+.tn-tooltip {
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 70;
+  max-width: 320px;
+  pointer-events: none;
+}
+
+.tn-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(95, 211, 232, 0.07) 0%, rgba(4, 6, 10, 0) 60%),
+    rgba(4, 6, 10, 0.86);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity var(--tn-slow) ease;
+}
+.tn-overlay.is-in { opacity: 1; }
+
+/* --------------------------------------------------------------------- */
+/*  Animations                                                           */
+/* --------------------------------------------------------------------- */
+
+@keyframes tn-slide-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes tn-scan {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(220%); }
+}
+
+@keyframes tn-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* --------------------------------------------------------------------- */
+/*  Accessibilité                                                        */
+/* --------------------------------------------------------------------- */
+
+.tn-ui :focus-visible,
+.tn-overlay :focus-visible {
+  outline: 1px solid var(--tn-accent);
+  outline-offset: 1px;
+}
+
+.tn-sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --------------------------------------------------------------------- */
+/*  Adaptatif — tablette et petits écrans                                */
+/* --------------------------------------------------------------------- */
+
+@media (max-width: 1100px), (pointer: coarse) {
+  :root {
+    --tn-rail: 52px;
+    --tn-panel-w: 280px;
+    --tn-tap: 40px;
+  }
+
+  /* Barre d'outils : icônes seules. */
+  .tn-tool-label { display: none; }
+  .tn-tool { width: var(--tn-rail); height: var(--tn-rail); }
+
+  .tn-btn, .tn-speed, .tn-icon-btn, .tn-layer, .tn-choice {
+    min-height: var(--tn-tap);
+  }
+  .tn-icon-btn { min-width: var(--tn-tap); }
+
+  .tn-res-cell { padding: 4px 6px; }
+  .tn-ind-cell { min-width: 74px; }
+}
+
+@media (max-width: 900px) {
+  .tn-topbar {
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 8px;
+  }
+  :root { --tn-top-h: 88px; }
+  .tn-res, .tn-ind { overflow-x: auto; }
+}
+
+@media (max-width: 700px) {
+  :root { --tn-panel-w: min(300px, calc(100vw - var(--tn-rail) - 3 * var(--tn-gap))); }
+
+  /* Le panneau de région devient une feuille glissant depuis le bas. */
+  .tn-region {
+    left: 0; right: 0; bottom: 0;
+    top: auto;
+    width: auto;
+    max-height: 56vh;
+    border-left: 0; border-right: 0; border-bottom: 0;
+    animation: tn-slide-in var(--tn-slow) ease;
+    z-index: 35;
+  }
+  .tn-region.is-collapsed .tn-panel-body { display: none; }
+  .tn-region .tn-collapse { display: inline-flex; }
+
+  .tn-left { bottom: 96px; }
+  .tn-dock { max-height: calc(100vh - var(--tn-top-h) - 180px); }
+  .tn-notifs { left: var(--tn-gap); right: var(--tn-gap); width: auto; bottom: 60vh; }
+  .tn-center-stack { bottom: 60px; }
+  .tn-timebar { bottom: 4px; }
+  .tn-debug { left: var(--tn-gap); right: var(--tn-gap); width: auto; bottom: 60vh; }
+}
+
+/* Le bouton de repli n'est utile qu'en mode feuille. */
+.tn-region .tn-collapse { display: none; }
+@media (max-width: 1100px), (pointer: coarse) {
+  .tn-region .tn-collapse { display: inline-flex; }
+  .tn-region.is-collapsed .tn-panel-body { display: none; }
+}

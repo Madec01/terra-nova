@@ -19,7 +19,7 @@
  * Tout est borné et lissé : aucune valeur ne doit pouvoir devenir NaN.
  */
 import { BALANCE } from '../data/balance.js';
-import { clamp, clamp01 } from '../utils/math.js';
+import { clamp, clamp01, smoothstep } from '../utils/math.js';
 
 /* Constantes numériques (filtrage / classification), sans effet d'équilibrage :
    elles n'existent pas dans BALANCE et ne pilotent aucun coût de gameplay. */
@@ -31,6 +31,8 @@ const OCEAN_TEMPERING = 0.5;
 const MAX_DAMPENING = 0.9;
 /** Fraction d'eau qu'une région émergée peut retenir (lacs, marécages). */
 const LAND_RETENTION = 0.08;
+/** Profondeur sous le niveau de mer à partir de laquelle un bassin est « plein ». */
+const BASIN_SLOPE = 0.25;
 
 export class ClimateSystem {
   constructor(game) {
@@ -132,7 +134,7 @@ export class ClimateSystem {
       G.co2 = clamp(G.co2 + acc.global.co2 * dt, 0, 100);
       G.oxygen = clamp(G.oxygen + acc.global.oxygen * dt, 0, 100);
       G.pressure = G.pressure + acc.global.pressure * dt;
-      G.insolation = clamp(G.insolation + acc.global.insolation * dt, 0, 4);
+      G.insolation = clamp(G.insolation + acc.global.insolation * dt, 0, C.maxInsolation);
 
       // Échanges biosphère ↔ atmosphère (la biomasse date du tick précédent).
       const bio = clamp(G.biomass, 0, BALANCE.biosphere.globalScale);
@@ -192,8 +194,7 @@ export class ClimateSystem {
 
     // Vapeur d'eau : nécessite de l'eau LIQUIDE (donc de la pression) et de la
     // chaleur. C'est la rétroaction positive qui peut emballer la planète.
-    const liquid = G.pressure > BALANCE.water.minPressureForLiquid
-      ? clamp01(waterCoverage / basin) : 0;
+    const liquid = G.pressure > BALANCE.water.minPressureForLiquid ? waterCoverage : 0;
     const warmth = clamp01((G.temperature - BALANCE.water.meltPoint) / BALANCE.biosphere.tempTolerance);
     const ghVapor = C.greenhouseVapor * liquid * warmth;
 
@@ -431,11 +432,14 @@ export class ClimateSystem {
     return BALANCE.atmosphere.sublimationPressure * intensity * dt;
   }
 
-  /** Capacité d'eau de surface d'une région : profonde dans les bassins. */
+  /**
+   * Capacité d'eau de surface d'une région. Une région émergée ne retient que
+   * des lacs ; dès qu'on descend sous le niveau de mer, la cuvette se remplit
+   * jusqu'à BALANCE.water.basinDepth (couverture totale de la cellule).
+   */
   _capacity(regions, i) {
     const seaLevel = BALANCE.planet.seaLevel;
-    const depth = clamp01((seaLevel - regions.elevation[i]) / (1 + seaLevel));
-    // Les terres retiennent un peu d'eau (lacs, marécages), les bassins tout.
+    const depth = smoothstep(seaLevel, seaLevel - BASIN_SLOPE, regions.elevation[i]);
     return BALANCE.water.basinDepth * (LAND_RETENTION + (1 - LAND_RETENTION) * depth);
   }
 }

@@ -104,15 +104,17 @@ export const BALANCE = {
     /** Effet de serre : saturation logarithmique du CO₂ + effet de la pression. */
     greenhouseCO2: 34,          // °C max via le CO₂
     greenhouseCO2Half: 22,      // « demi-effet » atteint à ce % de CO₂ x pression
-    greenhousePressure: 26,     // °C max via la pression totale
-    greenhousePressureHalf: 45, // kPa pour la moitié de l'effet
-    greenhouseVapor: 12,        // °C max via la vapeur d'eau (rétroaction)
+    greenhousePressure: 32,     // °C max via la pression totale
+    greenhousePressureHalf: 40, // kPa pour la moitié de l'effet
+    greenhouseVapor: 15,        // °C max via la vapeur d'eau (rétroaction)
     /** Inertie thermique : fraction de l'écart comblée par jour. */
     inertia: 0.0022,
     /** Amplitude du gradient latitudinal (équateur chaud / pôles froids). */
     latitudeSwing: 42,
     /** Refroidissement par kilomètre d'altitude équivalent (unité relief). */
     altitudeLapse: 55,
+    /** Plafond de sécurité de l'ensoleillement (miroirs orbitaux). */
+    maxInsolation: 2.0,
     /** Bruit climatique local (°C). */
     localVariance: 3.5,
   },
@@ -128,7 +130,7 @@ export const BALANCE = {
     /** L'oxygène produit par la biosphère, par point d'indice de biomasse et par jour. */
     oxygenPerBiomass: 0.00042,
     /** CO₂ consommé par la photosynthèse. */
-    co2PerBiomass: 0.00075,
+    co2PerBiomass: 0.00016,
     /** Plancher/plafond de sécurité. */
     minPressure: 0.2,
     maxPressure: 140,
@@ -225,9 +227,9 @@ export const BALANCE = {
     /** Habitabilité requise pour fonder une colonie (0..1). */
     minHabitability: 0.45,
     /** Population initiale et croissance. */
-    seedPopulation: 250,
-    growthRate: 0.0022,          // par jour, modulé par l'habitabilité
-    capacityPerColony: 12000,
+    seedPopulation: 400,
+    growthRate: 0.0040,          // par jour, modulé par l'habitabilité
+    capacityPerColony: 15000,
     /** Consommations par 1000 habitants et par jour. */
     upkeepPer1k: { energy: 1.6, water: 0.9, biomass: 0.55 },
     /** Productions par 1000 habitants et par jour. */
@@ -240,6 +242,12 @@ export const BALANCE = {
   /*  HABITABILITÉ (indice composite affiché au joueur)                    */
   /* --------------------------------------------------------------------- */
   habitability: {
+    /**
+     * Les facteurs sont combinés en MOYENNE GÉOMÉTRIQUE pondérée, pas en somme :
+     * la température, la pression et l'oxygène sont des nécessités, pas des
+     * qualités échangeables. Un seul facteur nul rend la région inhabitable —
+     * sinon une banquise à −42 °C atteignait le seuil de colonisation.
+     */
     idealTemp: 15,
     tempTolerance: 24,
     minPressure: 34,
@@ -300,7 +308,7 @@ export const BALANCE = {
     oxygen: { min: 16 },
     waterCoverage: { min: 0.25 },
     biomass: { min: 45 },
-    population: { min: 20000 },
+    population: { min: 15000 },
     stability: { min: 75 },
     /** Toutes les conditions doivent tenir ce nombre de jours consécutifs. */
     sustainDays: 180,

@@ -69,8 +69,12 @@ export class PlanetMesh {
   /**
    * @param {object} regions  RegionManager (contrat docs/CONTRACTS.md §2)
    * @param {object} state    état de jeu (peut être null au premier appel)
+   * @param {object|null} shared uniforms partagés (soleil, temps, insolation).
+   *        Si absent, la planète crée les siens et fait avancer son propre temps.
    */
-  constructor(regions, state) {
+  constructor(regions, state, shared = null) {
+    this._shared = shared;
+    this._ownsTime = !shared;
     this.radius = BALANCE.planet.radius;
     this.reliefScale = BALANCE.planet.reliefScale;
     this.count = regions.count | 0;
@@ -95,7 +99,7 @@ export class PlanetMesh {
     this.meanWater = 0;
 
     this._buildGeometry(regions);
-    this._buildMaterial();
+    this._buildMaterial(shared);
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.name = 'planet-surface';
@@ -286,14 +290,15 @@ export class PlanetMesh {
   /*  Matériaux                                                           */
   /* ==================================================================== */
 
-  _buildMaterial() {
+  _buildMaterial(shared) {
+    const s = shared || {};
     this.uniforms = {
       uBiomePalette: { value: biomePaletteArray() },
-      uSunDirection: { value: new THREE.Vector3(1, 0.35, 0.55).normalize() },
-      uSunColor: { value: new THREE.Color(1.0, 0.96, 0.90) },
-      uNightAmbient: { value: new THREE.Color(0.055, 0.075, 0.125) },
-      uInsolation: { value: 1 },
-      uTime: { value: 0 },
+      uSunDirection: s.uSunDirection || { value: new THREE.Vector3(1, 0.35, 0.55).normalize() },
+      uSunColor: s.uSunColor || { value: new THREE.Color(1.0, 0.96, 0.90) },
+      uNightAmbient: s.uNightAmbient || { value: new THREE.Color(0.055, 0.075, 0.125) },
+      uInsolation: s.uInsolation || { value: 1 },
+      uTime: s.uTime || { value: 0 },
       uRadius: { value: this.radius },
       uLayerFrom: { value: 0 },
       uLayerTo: { value: 0 },
@@ -465,7 +470,9 @@ export class PlanetMesh {
    * donc coût nul quand rien ne change.
    */
   update(dt, regions) {
-    this.uniforms.uTime.value += dt;
+    // Le temps n'est avancé ici que si personne d'autre ne le fait (uniform
+    // partagé avec SceneManager : c'est lui qui l'incrémente).
+    if (this._ownsTime) this.uniforms.uTime.value += dt;
     if (this._revealing.size === 0) return;
 
     const disc = regions.discovered;
@@ -478,6 +485,9 @@ export class PlanetMesh {
       let v = this.reveal[i];
       if (v < target) v = Math.min(target, v + step);
       else if (v > target) v = Math.max(target, v - step);
+      // On colle à la cible dès qu'on en est assez près : pas de 0,9999 résiduel.
+      const done = Math.abs(v - target) < 1e-3;
+      if (done) v = target;
       this.reveal[i] = v;
 
       const start = this.vertexStart[i];
@@ -487,7 +497,7 @@ export class PlanetMesh {
       this.attrInfo.addUpdateRange(start * 4, n * 4);
       touched = true;
 
-      if (Math.abs(v - target) < 1e-3) { this.reveal[i] = target; this._revealing.delete(i); }
+      if (done) this._revealing.delete(i);
     }
     if (touched) this.attrInfo.needsUpdate = true;
   }
@@ -509,6 +519,41 @@ export class PlanetMesh {
     hits.length = 0;
     if (fi === undefined || fi === null || fi >= this.faceToCell.length) return null;
     return this.faceToCell[fi];
+  }
+
+  /**
+   * Remplit `out` avec les coins DÉPLACÉS d'une cellule, lus directement dans
+   * la géométrie (donc rigoureusement alignés sur ce qui est affiché).
+   * @param {number} id
+   * @param {Float32Array} out  au moins 8*3 éléments
+   * @param {number} lift       facteur d'élévation (1.01 = 1 % au-dessus)
+   * @returns {number} nombre de coins écrits (0 si l'id est invalide)
+   */
+  getCellOutline(id, out, lift = 1.008) {
+    if (id === null || id === undefined || id < 0 || id >= this.count) return 0;
+    const n = (this.vertexCount[id] / 3) | 0;
+    const pos = this.geometry.attributes.position.array;
+    const start = this.vertexStart[id];
+    const max = Math.floor(out.length / 3);
+    const k = Math.min(n, max);
+    for (let j = 0; j < k; j++) {
+      // Dans l'éventail, le sommet 1 du triangle j est le coin j.
+      const v = (start + j * 3 + 1) * 3;
+      out[j * 3] = pos[v] * lift;
+      out[j * 3 + 1] = pos[v + 1] * lift;
+      out[j * 3 + 2] = pos[v + 2] * lift;
+    }
+    return k;
+  }
+
+  /** Direction unitaire (depuis le centre de la planète) d'une région. */
+  getRegionDirection(id, out) {
+    const target = out || new THREE.Vector3();
+    if (id === null || id === undefined || id < 0 || id >= this.count) return target.set(0, 1, 0);
+    const start = this.vertexStart[id];
+    const pos = this.geometry.attributes.position.array;
+    const v = start * 3;   // sommet 0 du premier triangle = centre de la cellule
+    return target.set(pos[v], pos[v + 1], pos[v + 2]).normalize();
   }
 
   /** Position monde du centre d'une région, à la surface du relief. */

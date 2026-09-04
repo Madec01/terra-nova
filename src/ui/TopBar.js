@@ -11,6 +11,9 @@ import { formatNumber, formatSigned } from '../utils/math.js';
 
 const NB = '\u00A0';
 
+/** Signe moins typographique (U+2212), et non le trait d'union. */
+const dec = (v, digits) => v.toFixed(digits).replace('-', '\u2212');
+
 /** Écriture paresseuse : on n'écrit dans le DOM que si la valeur a changé. */
 function setText(node, value) {
   if (node && node._v !== value) { node._v = value; node.textContent = value; }
@@ -135,7 +138,7 @@ export class TopBar {
       const def = ref.def;
       const raw = g[key] ?? 0;
       const v = raw * (def.scale || 1);
-      setText(ref.value, v.toFixed(def.digits) + (def.unit ? NB + def.unit : ''));
+      setText(ref.value, dec(v, def.digits) + (def.unit ? NB + def.unit : ''));
       const rate = this._rate(state, def);
       if (rate === null) setText(ref.trend, '');
       else {
@@ -226,7 +229,7 @@ export class TopBar {
     const raw = state.globals?.[def.key] ?? 0;
     const v = raw * (def.scale || 1);
     const rows = [
-      tipTitle(def.name.toUpperCase(), v.toFixed(def.digits) + (def.unit ? NB + def.unit : '')),
+      tipTitle(def.name.toUpperCase(), dec(v, def.digits) + (def.unit ? NB + def.unit : '')),
     ];
     const rate = this._rate(state, def);
     if (rate !== null) {

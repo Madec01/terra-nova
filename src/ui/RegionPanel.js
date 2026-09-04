@@ -8,7 +8,7 @@ import { BIOMES } from '../data/biomes.js';
 import { BUILDINGS } from '../data/buildings.js';
 import { formatNumber, formatSigned, formatLatLon, toLatLon, clamp } from '../utils/math.js';
 
-const NB = ' ';
+const NB = '\u00A0';
 
 function setText(node, value) {
   if (node && node._v !== value) { node._v = value; node.textContent = value; }
@@ -263,7 +263,7 @@ export class RegionPanel {
     setText(refs.biome, biomeName(view.biome));
     refs.anomaly.hidden = !view.anomaly;
 
-    setText(refs.temperature, (view.temperature ?? 0).toFixed(1) + NB + '°C');
+    setText(refs.temperature, (view.temperature ?? 0).toFixed(1).replace('-', '−') + NB + '°C');
     setText(refs.elevation, elevationLabel(view.elevation ?? 0));
     const pop = view.population ?? 0;
     setText(refs.population, pop >= 1 ? formatNumber(pop, 0) + NB + 'hab.' : '—');

@@ -109,7 +109,6 @@ varying vec3 vWorld;
 varying vec3 vObject;
 varying vec3 vNormalW;
 varying vec3 vCenterW;
-varying vec3 vCenterO;
 varying float vEdge;
 varying float vCell;
 varying vec4 vData;
@@ -131,7 +130,6 @@ void main() {
   vec3 centerPos = mix(centerFlat, aCenter, shape);
 
   vObject = pos;
-  vCenterO = centerPos;
   vec4 wp = modelMatrix * vec4(pos, 1.0);
   vWorld = wp.xyz;
   vCenterW = (modelMatrix * vec4(centerPos, 1.0)).xyz;
@@ -171,7 +169,6 @@ varying vec3 vWorld;
 varying vec3 vObject;
 varying vec3 vNormalW;
 varying vec3 vCenterW;
-varying vec3 vCenterO;
 varying float vEdge;
 varying float vCell;
 varying vec4 vData;
@@ -281,8 +278,16 @@ void main() {
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 L = normalize(uSunDirection);
 
+  // Chaque cellule tire sa propre graine de son centre : deux cellules
+  // voisines de même biome n'ont ainsi jamais exactement le même grain.
+  float cellSeed = fract(sin(dot(vCenterW, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+
   // Grain de surface (espace objet : stable quand la planète tourne)
-  float surfNoise = tnFbm3(vObject * 34.0 + vec3(11.3, 4.7, 19.1));
+  float surfNoise = tnFbm3(vObject * 34.0 + vec3(11.3, 4.7, 19.1) + cellSeed * 7.0);
+
+  // Distance normalisée au centre de la cellule, mesurée géométriquement
+  // depuis aCenter : sert au liseré de bord conjointement à vEdge.
+  float radial = clamp(length(vWorld - vCenterW) / max(length(vWorld) * 0.09, 1e-4), 0.0, 1.0);
 
   // Couleur : fondu animé entre deux couches.
   vec3 colA = layerColor(uLayerFrom, ice, water, minerals, geo, surfNoise);
@@ -295,7 +300,9 @@ void main() {
     uLayerTo == 0 ? 0.0 : clamp(uLayerBlend, 0.0, 1.0));
 
   /* --- liseré de bord de cellule --------------------------------------- */
-  float border = smoothstep(0.80, 0.995, vEdge);
+  // vEdge est exact (0 au centre, 1 sur le bord) ; radial le renforce sur les
+  // cellules très allongées, où l'interpolation barycentrique seule triche un peu.
+  float border = smoothstep(0.80, 0.995, max(vEdge, radial * 0.92));
   float borderAmount = uEdgeStrength * mix(0.16, 1.0, dataMode) * border;
   albedo *= 1.0 - borderAmount * 0.55;
 

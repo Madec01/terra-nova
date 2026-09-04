@@ -22,7 +22,7 @@ varying vec3 vNormalW;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
-  // Normale sortante de la sphère (on est en BackSide : `normal` pointe encore
+  // Normale sortante de la sphère (on est en BackSide : « normal » pointe encore
   // vers l'extérieur en espace objet, c'est ce qu'on veut).
   vNormalW = normalize(mat3(modelMatrix) * normal);
   gl_Position = projectionMatrix * viewMatrix * wp;

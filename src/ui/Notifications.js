@@ -54,9 +54,10 @@ export class Notifications {
 
     item.offs.push(on(card.querySelector('.tn-notif-close'), 'click', (e) => { e.stopPropagation(); close(); }));
     if (hasRegion) {
+      // On centre la caméra sans sélectionner : une sélection déclencherait
+      // une construction si l'interface est en mode placement.
       const focus = () => {
         try { this.scene?.focusRegion?.(n.regionId); } catch { /* ignore */ }
-        try { this.game?.selectRegion?.(n.regionId); } catch { /* ignore */ }
         close();
       };
       item.offs.push(on(card, 'click', focus));
