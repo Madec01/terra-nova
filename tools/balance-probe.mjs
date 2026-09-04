@@ -4,6 +4,11 @@
  *
  *   node tools/balance-probe.mjs [seed] [annees]
  *   node tools/balance-probe.mjs --multi [n] [annees]   (n seeds, résumé compact)
+ *   node tools/balance-probe.mjs --bad   [n] [annees]   (joueur imprudent : doit perdre)
+ *   node tools/balance-probe.mjs --ablate [seed] [annees]
+ *        retire un bâtiment (ou une branche technologique) à la fois et
+ *        compare la date de victoire : c'est le test « ce contenu sert-il à
+ *        quelque chose ? ». Un écart nul = du décor, à corriger ou à supprimer.
  *
  * Ce n'est PAS un test de régression : c'est un outil de game design pour
  * répondre à « la partie est-elle gagnable, et en combien de temps ? ».
@@ -65,7 +70,9 @@ const WANT = {
 /**
  * Joue une partie et retourne son historique + son verdict.
  */
-function playGame(seed, years, reckless = false) {
+function playGame(seed, years, reckless = false, ablate = null) {
+  /** Contenu retiré pour cette partie (sonde d'ablation). */
+  const banned = new Set(ablate || []);
   const game = new Game();
   game.newGame({ seed });
   const R = game.regions, S = game.state;
@@ -78,6 +85,7 @@ function playGame(seed, years, reckless = false) {
   };
 
   function tryBuildMany(type, wanted, scoreFn) {
+    if (banned.has(type)) return 0;
     let built = 0;
     for (const i of ranked(scoreFn)) {
       if (built >= wanted) break;
@@ -136,7 +144,10 @@ function playGame(seed, years, reckless = false) {
     // Recherche PROGRESSIVE : on ne peut en mener qu'une à la fois, on
     // enchaîne donc le plan dès que le laboratoire se libère.
     if (!S.tech.current) {
-      for (const id of PLAN) if (game.canResearch(id).ok) { game.startResearch(id); break; }
+      for (const id of PLAN) {
+        if (banned.has(id)) continue;
+        if (game.canResearch(id).ok) { game.startResearch(id); break; }
+      }
     }
 
     // Infrastructure de base, dimensionnée sur la demande.
@@ -388,8 +399,53 @@ function printMulti(n, years, reckless = false) {
     + ` · énergie contrainte : ${avgEco('tightPower')} % des jours\n`);
 }
 
+/* ===================================================================== */
+/*  SONDE D'ABLATION — « ce contenu sert-il à quelque chose ? »          */
+/* ===================================================================== */
+
+/** Chaque scénario retire UN élément de contenu et rejoue la même partie. */
+const ABLATIONS = [
+  { label: 'référence', remove: [] },
+  { label: 'sans dépôt logistique', remove: ['depot'] },
+  { label: 'sans raffinerie', remove: ['refinery'] },
+  { label: 'sans réacteur à fusion', remove: ['fusion'] },
+  { label: 'sans centrale géothermique', remove: ['geothermal'] },
+  { label: 'sans mine', remove: ['mine'] },
+  { label: 'sans station scientifique', remove: ['science_station'] },
+  { label: 'sans station de fonte polaire', remove: ['polar_melter'] },
+  { label: 'sans stabilisateur climatique', remove: ['climate_stabilizer'] },
+  { label: 'sans miroirs orbitaux', remove: ['orbital_mirror'] },
+  { label: 'sans usines à gaz', remove: ['ghg_factory'] },
+  { label: 'sans tours d’ensemencement', remove: ['seeder'] },
+  { label: 'branche INDUSTRIE retirée', remove: ['metallurgy', 'automation', 'deep_drilling'] },
+  { label: 'branche BIOLOGIE amputée (écosystèmes)', remove: ['ecosystems'] },
+];
+
+function printAblation(seed, years) {
+  console.log(`\nSONDE D'ABLATION — seed ${seed}, ${years} ans`);
+  console.log('  Un contenu dont le retrait ne change RIEN est du décor.\n');
+  console.log('  scénario                                 victoire   bât  scans     T°C     bio      pop  écart');
+  console.log('  ' + '─'.repeat(100));
+  let ref = null;
+  for (const a of ABLATIONS) {
+    const run = playGame(seed, years, false, a.remove);
+    const g = run.state.globals;
+    const year = run.victoryDay !== null ? run.victoryDay / 365 : null;
+    if (ref === null && year !== null) ref = year;
+    const delta = year === null ? 'PERDU'
+      : (ref === null ? '—' : (year - ref >= 0 ? '+' : '') + (year - ref).toFixed(1) + ' an');
+    const bat = run.atVictory ? String(run.atVictory.buildings).padStart(4) : '   —';
+    const sc = run.atVictory ? String(run.atVictory.scans).padStart(5) : '    —';
+    console.log(`  ${a.label.padEnd(40)} ${(year !== null ? 'an ' + year.toFixed(1) : '—').padStart(9)}`
+      + ` ${bat} ${sc} ${f(g.temperature)} ${f(g.biomass, 1)} ${String(Math.round(g.population)).padStart(8)}  ${delta}`);
+  }
+  console.log();
+}
+
 const arg0 = process.argv[2];
-if (arg0 === '--multi') {
+if (arg0 === '--ablate') {
+  printAblation(Number(process.argv[3] ?? 20260904), Number(process.argv[4] ?? 60));
+} else if (arg0 === '--multi') {
   printMulti(Number(process.argv[3] ?? 6), Number(process.argv[4] ?? 60));
 } else if (arg0 === '--bad') {
   // Contre-épreuve : la même partie jouée sans discernement doit ÉCHOUER.

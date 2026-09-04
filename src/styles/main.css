@@ -276,7 +276,10 @@ body:has(.tn-ui.is-scanning) > canvas { cursor: cell; }
   inset: 0;
   z-index: 60;
   display: flex;
+  /* `center` seul rend le HAUT d'un panneau plus grand que l'écran
+     inatteignable au défilement : `safe` bascule sur `flex-start` dans ce cas. */
   align-items: center;
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
   overflow: auto;
@@ -534,7 +537,7 @@ html.tn-phone .tn-tooltip { max-width: none; }
 /* --- 4. Téléphone en paysage : la hauteur manque, les panneaux passent  */
 /*        sur les côtés et le bas se met sur une seule rangée.            */
 html.tn-phone-land {
-  --tn-top-h: calc(50px + var(--tn-safe-t));
+  --tn-top-h: calc(56px + var(--tn-safe-t));
   --tn-bottom-h: calc(56px + var(--tn-safe-b));
 }
 html.tn-phone-land .tn-topbar { flex-direction: row; align-items: center; gap: 6px; }
@@ -568,7 +571,12 @@ html.tn-phone-land .tn-region {
 html.tn-phone-land .tn-region.is-peek .tn-region-details { display: block; }
 html.tn-phone-land .tn-region.is-peek .tn-panel-body { overflow-y: auto; }
 html.tn-phone-land .tn-sheet-grab { display: none; }
-html.tn-phone-land .tn-notifs { left: auto; right: 8px; width: 300px; }
+/* En paysage les feuilles occupent les côtés : les bulles se rangent dans
+   l'espace libre, jamais par-dessus une commande. */
+html.tn-phone-land .tn-notifs { left: 8px; right: 8px; width: auto; }
+html.tn-phone-land .tn-ui.has-region .tn-notifs { left: calc(min(320px, 50vw) + 12px); }
+html.tn-phone-land .tn-ui.has-panel .tn-notifs { right: calc(min(340px, 52vw) + 12px); }
+html.tn-phone-land .tn-center-stack { max-width: 60vw; width: auto; }
 
 /* --- 5. Zones sûres sur les surfaces plein écran ---------------------- */
 html.tn-phone .tn-overlay {

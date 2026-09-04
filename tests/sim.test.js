@@ -134,6 +134,17 @@ test('pénurie d’énergie : la satisfaction chute et la production suit', () =
   const poor = mines(false);
   const rich = mines(true);
 
+  /* ADAPTÉ AU RESSERREMENT DU STOCKAGE (BALANCE.storage.materials divisé par
+     trois) : après 120 jours, la version ALIMENTÉE remplit son entrepôt et son
+     `flux.materials` retombe à zéro — le flux affiché est le net RÉELLEMENT
+     encaissé, écrêtage compris. Comparer les deux flux comparait donc deux
+     entrepôts pleins. On vide les stocks et on mesure UN jour de production :
+     c'est bien la production, et non le plafond, qui est testée ici. */
+  poor.state.resources.materials = 0;
+  rich.state.resources.materials = 0;
+  poor.run(1);
+  rich.run(1);
+
   assert.ok(poor.state.power.satisfaction < 0.5,
     `satisfaction attendue basse, obtenue ${poor.state.power.satisfaction}`);
   assert.ok(poor.state.power.satisfaction >= BALANCE.power.brownoutFloor,
@@ -274,23 +285,90 @@ test('aucun événement avant graceDays, puis des événements ensuite', () => {
 /*  8. Exploration                                                       */
 /* ===================================================================== */
 
-test('scan orbital : coût, durée, révélation et refus explicite', () => {
+/**
+ * ADAPTÉ AU MODÈLE « ZONE + FILE D'ATTENTE ». Deux changements de fond :
+ *  1. un scan ne révèle plus une cellule mais la cible ET son voisinage
+ *     (BALANCE.exploration.zoneRings) ;
+ *  2. faute de sonde libre OU de ressources, la région n'est plus REFUSÉE
+ *     mais MISE EN FILE — le refus ne subsiste que pour les cas qui n'ont
+ *     aucun sens (région inconnue, déjà cartographiée, déjà prévue).
+ */
+test('scan orbital : coût, durée, révélation en zone et refus explicite', () => {
   const h = createSimHarness({ seed: 18, init: (R) => { R.discovered.fill(0); R.discovered[0] = 1; } });
   const explo = h.systems.find((s) => s.constructor.name === 'ExplorationSystem');
 
-  h.state.resources.energy = 200;
+  h.state.resources.energy = 2000;
+  h.state.resources.materials = 2000;
   assert.equal(explo.startScan(h.ctx, 0), false, 'région déjà découverte → refus');
   assert.equal(explo.startScan(h.ctx, 5), true);
   assert.equal(h.state.explore.scanning.length, 1);
-  assert.equal(explo.startScan(h.ctx, 5), false, 'scan déjà en cours → refus');
+  assert.equal(explo.startScan(h.ctx, 5), false, 'scan déjà prévu → refus');
 
+  // Sans ressources, la cible est mise en file au lieu d'être perdue.
   h.state.resources.energy = 0;
-  assert.equal(explo.startScan(h.ctx, 6), false, 'énergie insuffisante → refus');
+  h.state.resources.materials = 0;
+  assert.equal(explo.startScan(h.ctx, 60), true, 'sans énergie → mise en file');
+  assert.equal(h.state.explore.queue[0], 60);
 
   h.run(BALANCE.exploration.scanDays + 2);
-  assert.equal(h.regions.discovered[5], 1, 'la région doit être révélée');
+  assert.equal(h.regions.discovered[5], 1, 'la région visée doit être révélée');
   assert.equal(h.state.explore.scanning.length, 0);
   assert.ok(h.state.stats.scanned >= 1);
+  // Le scan couvre une ZONE : au moins un voisin direct est révélé aussi.
+  const neigh = h.regions.neighbors(5);
+  let around = 0;
+  for (let j = 0; j < neigh.length; j++) if (h.regions.discovered[neigh[j]]) around++;
+  assert.ok(around >= 1, `le premier anneau doit être révélé (${around} voisins)`);
+  // La cible en file reste en attente tant que le coût n'est pas payable.
+  assert.equal(h.state.explore.queue[0], 60, 'la file conserve la cible impayable');
+  assert.equal(h.state.stats.scansLaunched, 1, 'un seul scan a réellement été lancé');
+});
+
+test('la file de scans est consommée par les sondes dès qu’elles se libèrent', () => {
+  const h = createSimHarness({ seed: 118, init: (R) => { R.discovered.fill(0); R.discovered[0] = 1; } });
+  const game = h.game;
+  const explo = h.systems.find((s) => s.constructor.name === 'ExplorationSystem');
+  h.state.resources.energy = 100000;
+  h.state.resources.materials = 100000;
+
+  // Bien plus de cibles que de sondes : tout doit être accepté.
+  const targets = [];
+  for (let i = 1; i < h.regions.count && targets.length < 9; i += 7) targets.push(i);
+  for (const t of targets) assert.equal(explo.startScan(h.ctx, t), true, `cible ${t} acceptée`);
+
+  const slots = h.state.explore.scanning.length;
+  assert.ok(slots > 0 && slots <= BALANCE.start.probes, 'les sondes disponibles sont occupées');
+  assert.equal(h.state.explore.queue.length, targets.length - slots, 'le reste est en file');
+  assert.equal(h.state.explore.probesFree, 0, 'plus aucune sonde libre');
+
+  // Annulation d'une cible en file : elle disparaît sans rien coûter.
+  const queued = h.state.explore.queue[h.state.explore.queue.length - 1];
+  assert.equal(explo.cancelScan(h.ctx, queued), true);
+  assert.equal(h.state.explore.queue.indexOf(queued), -1);
+  assert.equal(explo.cancelScan(h.ctx, queued), false, 'annuler deux fois ne fait rien');
+
+  // Au bout de quelques cycles, la file s'est vidée toute seule.
+  h.run(BALANCE.exploration.scanDays * 6);
+  assert.equal(h.state.explore.queue.length, 0, 'la file doit se vider sans intervention');
+  assert.ok(h.state.stats.scansLaunched >= 4, 'les sondes ont enchaîné les scans');
+  assert.ok(game.dirty.size > 0 || game.allDirty, 'le rendu est prévenu des révélations');
+});
+
+test('exploration automatique : elle empile la frontière du territoire connu', () => {
+  const h = createSimHarness({ seed: 119, init: (R) => { R.discovered.fill(0); R.discovered[0] = 1; } });
+  h.state.resources.energy = 100000;
+  h.state.resources.materials = 100000;
+  h.state.explore.autoExplore = true;
+
+  const before = h.state.stats.scansLaunched;
+  h.run(BALANCE.exploration.scanDays * 3);
+  assert.ok(h.state.stats.scansLaunched > before, 'des scans partent sans ordre du joueur');
+
+  let discovered = 0;
+  for (let i = 0; i < h.regions.count; i++) if (h.regions.discovered[i]) discovered++;
+  assert.ok(discovered > 1, `la carte doit s'étendre toute seule (${discovered} secteurs)`);
+  // Elle reste bornée : jamais plus que la profondeur de file configurée.
+  assert.ok(h.state.explore.queue.length <= BALANCE.exploration.autoQueueDepth);
 });
 
 /* ===================================================================== */
@@ -328,9 +406,13 @@ test('victoire déclenchée après sustainDays et une seule fois', () => {
   // On teste VictorySystem SEUL : les autres systèmes recalculeraient les
   // globales à chaque tick et effaceraient les conditions forcées.
   const vctx = { game: h.game, state: h.state, regions: h.regions, bus: h.game.bus, dt: 1 };
+  /* ADAPTÉ AUX OBJECTIFS RESSERRÉS (BALANCE.victory) : les anciens chiffres
+     (biomasse 60, 30 000 habitants) sont désormais SOUS les seuils exigés.
+     On force donc un monde confortablement au-dessus de chaque cible, ce que
+     ce test veut vraiment vérifier : le décompte des `sustainDays`. */
   const win = () => {
-    g.temperature = 14; g.pressure = 80; g.oxygen = 21;
-    g.waterCoverage = 0.4; g.biomass = 60; g.population = 30000; g.stability = 90;
+    g.temperature = 14; g.pressure = 90; g.oxygen = 24;
+    g.waterCoverage = 0.4; g.biomass = 80; g.population = 60000; g.stability = 96;
   };
 
   for (let d = 0; d < BALANCE.victory.sustainDays - 5; d++) { win(); victory.tick(vctx); }
@@ -603,4 +685,127 @@ test('un tick complet à 642 régions reste rapide', () => {
   assert.ok(ms < 5, `tick trop lent : ${ms.toFixed(3)} ms`);
   // Indicatif : la cible de production est 1,5 ms/tick.
   console.log(`   → ${ms.toFixed(3)} ms par tick (${regions.count} régions)`);
+});
+
+/* ===================================================================== */
+/*  14. RECHERCHE PROGRESSIVE                                            */
+/* ===================================================================== */
+
+/**
+ * La recherche n'est plus un achat instantané : `Game.startResearch` ENGAGE le
+ * laboratoire, `ResearchSystem` verse la science jour après jour, et
+ * `Game.cancelResearch` rend la moitié des points investis. Ces tests portent
+ * sur le contrat exact décrit dans docs/CONTRACTS.md.
+ */
+
+/** Le vrai `Game` touche localStorage via l'autosauvegarde : on le neutralise. */
+function withFakeStorage(fn) {
+  const had = Object.prototype.hasOwnProperty.call(globalThis, 'localStorage');
+  const prev = globalThis.localStorage;
+  const map = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => { map.set(k, String(v)); },
+    removeItem: (k) => { map.delete(k); },
+  };
+  globalThis.btoa = globalThis.btoa || ((s) => Buffer.from(s, 'binary').toString('base64'));
+  globalThis.atob = globalThis.atob || ((s) => Buffer.from(s, 'base64').toString('binary'));
+  try { return fn(); } finally { if (had) globalThis.localStorage = prev; else delete globalThis.localStorage; }
+}
+
+test('startResearch engage le laboratoire au lieu d’acheter la technologie', async () => {
+  const { Game } = await import('../src/core/Game.js');
+  withFakeStorage(() => {
+    const g = new Game();
+    g.newGame({ seed: 4242 });
+    const started = [];
+    const done = [];
+    g.bus.on('research:started', (p) => started.push(p.techId));
+    g.bus.on('research:completed', (p) => done.push(p.techId));
+
+    // Le stock de science n'est PLUS une condition : seuls comptent les
+    // prérequis et le fait que le laboratoire soit libre.
+    g.state.resources.science = 0;
+    assert.equal(g.canResearch('orbital_survey').ok, true, 'aucun stock requis pour s’engager');
+    assert.equal(g.startResearch('orbital_survey'), true);
+    assert.equal(g.state.tech.current, 'orbital_survey');
+    assert.equal(g.state.tech.progress, 0);
+    assert.deepEqual(started, ['orbital_survey']);
+    assert.equal(done.length, 0, 'la recherche ne se termine pas au lancement');
+    assert.equal(g.state.tech.unlocked.includes('orbital_survey'), false);
+
+    // Un seul axe à la fois : c'est là qu'est l'arbitrage.
+    const busy = g.canResearch('metallurgy');
+    assert.equal(busy.ok, false);
+    assert.match(busy.reason, /Laboratoire occupé/);
+    assert.equal(g.canResearch('fusion').ok, false, 'prérequis manquants');
+
+    // La science produite alimente la technologie en cours.
+    for (let d = 0; d < 200; d++) g._tick(1, d);
+    assert.ok(g.state.tech.progress > 0, `la progression doit monter (${g.state.tech.progress})`);
+    const eta = g.researchEta();
+    assert.ok(eta === null || (Number.isFinite(eta) && eta >= 0), `ETA invalide : ${eta}`);
+
+    // Jusqu'à l'achèvement, qui n'arrive qu'à la FIN.
+    for (let d = 0; d < 20000 && !g.state.tech.unlocked.includes('orbital_survey'); d++) g._tick(1, d);
+    assert.equal(g.state.tech.unlocked.includes('orbital_survey'), true, 'la recherche doit aboutir');
+    assert.deepEqual(done, ['orbital_survey']);
+    assert.equal(g.state.tech.current, null, 'le laboratoire se libère');
+    assert.equal(g.state.tech.progress, 0);
+    assert.equal(g.state.stats.researched, 1);
+    // Et l'effet passif est bien appliqué (une sonde de plus).
+    assert.equal(g.techEffects.probes, 1);
+  });
+});
+
+test('cancelResearch rembourse la moitié des points investis', async () => {
+  const { Game } = await import('../src/core/Game.js');
+  withFakeStorage(() => {
+    const g = new Game();
+    g.newGame({ seed: 4243 });
+    assert.equal(g.cancelResearch(), false, 'rien à annuler au départ');
+
+    g.startResearch('metallurgy');
+    for (let d = 0; d < 400; d++) g._tick(1, d);
+    const invested = g.state.tech.progress;
+    assert.ok(invested > 0);
+    const stock = g.state.resources.science;
+
+    assert.equal(g.cancelResearch(), true);
+    assert.equal(g.state.tech.current, null);
+    assert.equal(g.state.tech.progress, 0);
+    assert.ok(Math.abs(g.state.resources.science - (stock + invested * BALANCE.research.refund)) < 1e-6,
+      'la moitié des points doit revenir au stock');
+    assert.equal(g.state.tech.unlocked.includes('metallurgy'), false);
+
+    // Le laboratoire est de nouveau libre : on peut changer d'axe.
+    assert.equal(g.canResearch('exobiology').ok, true);
+  });
+});
+
+test('la file de scans et l’exploration automatique sont pilotables depuis Game', async () => {
+  const { Game } = await import('../src/core/Game.js');
+  withFakeStorage(() => {
+    const g = new Game();
+    g.newGame({ seed: 4244 });
+    g.debug.addResources(50000);
+
+    const unknown = [];
+    for (let i = 0; i < g.regions.count && unknown.length < 8; i++) {
+      if (!g.regions.discovered[i]) unknown.push(i);
+    }
+    for (const i of unknown) assert.equal(g.scanRegion(i), true, 'toute cible valide est acceptée');
+    const pending = g.state.explore.queue.length + g.state.explore.scanning.length;
+    assert.equal(pending, unknown.length, 'lancés ou mis en file, aucun n’est perdu');
+    assert.equal(g.state.explore.probesFree, 0);
+
+    assert.equal(g.cancelScan(unknown[unknown.length - 1]), true);
+    assert.equal(g.state.explore.queue.length + g.state.explore.scanning.length, pending - 1);
+
+    assert.equal(g.autoExplore, false);
+    g.setAutoExplore(true);
+    assert.equal(g.autoExplore, true);
+    g.setAutoExplore(false);
+    assert.equal(g.autoExplore, false);
+  });
 });

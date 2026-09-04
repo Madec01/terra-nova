@@ -285,6 +285,7 @@ export class UIManager {
     const hideRegion = this.isPhone && (!!this.activePanel || !!this.placingType || this.scanMode);
     this.regionPanel?.suppress(hideRegion);
     if (this.scrim) this.scrim.hidden = !(this.isPhone && this.activePanel);
+    this.root.classList.toggle('has-panel', !!this.activePanel);
     this.root.classList.toggle('has-region', !!this.regionPanel?.node && !this.regionPanel.node.hidden);
   }
 
@@ -388,10 +389,9 @@ export class UIManager {
   /** Première consigne : le joueur sait quoi faire dans les dix secondes. */
   _showOnboarding() {
     if (!this.hintBar) return;
-    const site = this.game.regions?.landingSite;
-    const where = Number.isInteger(site) && site >= 0 ? ` Le secteur ${site} est votre site d’atterrissage.` : '';
-    this.hintText.textContent = 'Objectif : cartographier trois secteurs.'
-      + ' Appuyez sur un secteur sombre, puis sur « Lancer un scan orbital ».' + where;
+    const verb = this.isTouch ? 'Appuyez' : 'Cliquez';
+    this.hintText.textContent = 'Objectif : cartographier trois secteurs. '
+      + verb + ' sur un secteur sombre, puis sur « Lancer un scan orbital ».';
     this.hintBar.hidden = false;
   }
 
