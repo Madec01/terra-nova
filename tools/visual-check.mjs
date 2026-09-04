@@ -22,6 +22,15 @@ import { chromium } from 'playwright';
 import { mkdirSync, existsSync } from 'node:fs';
 
 const SHOT_DIR = process.env.SHOT_DIR || '/tmp/tn-visual';
+/**
+ * Graine de la partie photographiée. 8919 est la partie de référence de
+ * l'équilibrage (`node tools/balance-probe.mjs 8919 40`) : c'est elle qui donne
+ * les valeurs auxquelles cet outil doit aboutir en JOUANT, et non en écrivant
+ * l'état à la main.
+ */
+const SEED = 8919;
+/** Années de jeu simulées avant la capture « terraformée ». */
+const YEARS = 40;
 const PORT = 5600 + Math.floor(Math.random() * 300);
 const KEEP = process.argv.includes('--keep');
 /** Filtres passés en argument : `node tools/visual-check.mjs a c` → a-*, c-*. */
@@ -149,7 +158,7 @@ async function run() {
 
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'load', timeout: 30000 });
   await page.waitForFunction(() => !!window.TERRA, { timeout: 20000 });
-  await page.evaluate(() => window.TERRA.game.newGame({ seed: 808 }));
+  await page.evaluate((seed) => window.TERRA.game.newGame({ seed }), SEED);
   await page.waitForTimeout(1200);
   await hideUI(true);
 
@@ -180,80 +189,134 @@ async function run() {
   await aim({ dTheta: -1.05, dPhi: 0.16, dist: 3.5 });
   await shot('b-decouverte');
 
-  /* --- terraformation complète ----------------------------------------- */
-  // Deux temps :
-  //  1. on joue VRAIMENT : on couvre la planète de terraformeurs, on débloque
-  //     tout et on avance la simulation de plusieurs milliers de jours ;
-  //  2. on impose ensuite l'état CIBLE de fin de partie (océans remplis,
-  //     calottes réduites aux pôles, végétation installée, atmosphère dense).
-  //     L'équilibrage de la simulation n'est pas l'objet de cet outil : ce qui
-  //     est photographié ici, c'est le rendu d'un monde vivant, pour juger si
-  //     les seuils du shader sont bien calés.
-  const terra = await page.evaluate(() => {
+  /* --- terraformation : ON JOUE VRAIMENT LA PARTIE ---------------------- */
+  // Aucune valeur n'est écrite à la main. Un « joueur automatique » (le même
+  // que celui de tools/balance-probe.mjs) explore, cherche, construit ET
+  // DÉMONTE pendant YEARS années de simulation. C'est le seul état sur lequel
+  // il est honnête de caler des seuils de rendu : un état imposé produirait des
+  // combinaisons (eau, glace, végétation) que la simulation ne génère jamais.
+  //
+  // Référence attendue à la fin (seed 8919, an 40, cf. balance-probe) :
+  //   T ≈ 21 °C · P ≈ 87 kPa · O2 ≈ 24 % · eau ≈ 23 % · biomasse ≈ 86
+  //   ~190 bâtiments · végétation moyenne ≈ 0,7 · glace moyenne ≈ 0,04
+  const terra = await page.evaluate((years) => {
     const g = window.TERRA.game;
-    const d = g.debug;
-    const R = g.regions;
-    const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+    const S = g.state, R = g.regions;
+    const BAL = window.TERRA.BALANCE;
 
-    d.addResources(5e7); d.addScience(5e7); d.unlockAllTech();
-    const kinds = ['ghg_factory', 'atmo_processor', 'o2_generator', 'polar_melter',
-      'orbital_mirror', 'fusion', 'seeder', 'biodome', 'colony', 'climate_stabilizer'];
-    let built = 0;
-    for (let pass = 0; pass < kinds.length; pass++) {
-      for (let i = 0; i < R.count; i += 6) {
-        if (g.build(kinds[(pass + i) % kinds.length], i)) built++;
-      }
-      d.addResources(5e7);
-    }
-    for (let i = 0; i < 6000; i++) {
-      g._tick(1, i);
-      if (i % 400 === 0) { d.addResources(5e7); d.addScience(5e7); }
-    }
+    /* Ordre de recherche d'un joueur qui vise la victoire. */
+    const PLAN = [
+      'orbital_survey', 'geothermal_tap', 'metallurgy', 'greenhouse_gases', 'exobiology',
+      'energy_grid', 'polar_engineering', 'automation', 'pioneer_organisms',
+      'atmospheric_engineering', 'orbital_infrastructure', 'forestation',
+      'carbon_capture', 'fusion', 'colonization', 'climate_control',
+      'ecosystems', 'deep_drilling', 'terraform_mastery',
+    ];
+    const TARGET_T = { low: 4, high: 22, panic: 27 };
 
-    /* --- état cible imposé -------------------------------------------- */
-    const sea = window.TERRA.BALANCE.planet.seaLevel;
-    const basin = window.TERRA.BALANCE.water.basinDepth;
-    for (let i = 0; i < R.count; i++) {
-      const lat = Math.abs(R.positions[i * 3 + 1]);          // 0 équateur, 1 pôle
-      const depth = sea - R.elevation[i];
-      const polar = clamp01((lat - 0.78) / 0.20);
-      R.temperature[i] = 26 - 52 * lat * lat - R.elevation[i] * 22;
-      if (depth > 0) {
-        R.water[i] = basin * clamp01(0.35 + depth * 4.0);
-        R.moisture[i] = 1;
-        R.vegetation[i] = 0;
-      } else {
-        R.water[i] = 0;
-        R.moisture[i] = clamp01(0.75 - R.elevation[i] * 1.1 - polar * 0.5);
-        R.vegetation[i] = clamp01((0.95 - polar * 1.3) * (0.45 + R.moisture[i] * 0.75));
-      }
-      R.ice[i] = polar > 0 ? clamp01(polar * 1.4) : 0;
-      if (R.ice[i] > 0.5) R.vegetation[i] = 0;
-      R.pollution[i] = clamp01(R.pollution[i] * 0.5);
-      R.population[i] = R.buildingCount[i] > 0 ? 900 + R.buildingCount[i] * 1400 : 0;
-    }
-    // Trois ticks : biomes, habitabilité et couverture globale se recalculent
-    // à partir de l'état qu'on vient d'écrire.
-    for (let i = 0; i < 3; i++) g._tick(1, i);
-
-    const G = g.state.globals;
-    G.temperature = 15.5;
-    G.pressure = 97;
-    G.oxygen = 21;
-    G.co2 = 0.4;
-    G.biomass = 64;
-    G.stability = 92;
-    G.cloudCover = 0.52;
-    G.population = 420000;
-    g.setSpeed(0);            // la simulation est gelée : l'image ne dérive plus
-    g.markAllDirty();
-    return {
-      built, days: g.state.time.day | 0,
-      waterCoverage: +G.waterCoverage.toFixed(3), iceCover: +G.iceCover.toFixed(3),
+    const ranked = (scoreFn) => {
+      const out = [];
+      for (let i = 0; i < R.count; i++) if (R.discovered[i]) out.push([i, scoreFn(i)]);
+      out.sort((a, b) => b[1] - a[1]);
+      return out.map((x) => x[0]);
     };
-  });
-  console.log(`  (terraformation : ${terra.built} bâtiments, jour ${terra.days}, `
-    + `eau ${terra.waterCoverage}, glace ${terra.iceCover})`);
+    const tryBuildMany = (type, wanted, scoreFn) => {
+      let built = 0;
+      for (const i of ranked(scoreFn)) {
+        if (built >= wanted) break;
+        if (g.canBuild(type, i).ok && g.build(type, i)) built++;
+      }
+      return built;
+    };
+    const count = (t) => S.buildings.filter((b) => b.type === t).length;
+    const demolishSome = (type, n) => {
+      const list = S.buildings.filter((b) => b.type === type);
+      let done = 0;
+      for (let k = list.length - 1; k >= 0 && done < n; k--) if (g.demolish(list[k].id)) done++;
+      return done;
+    };
+
+    function play() {
+      const gl = S.globals;
+      for (let i = 0; i < R.count; i++) {
+        if (!R.discovered[i] && S.explore.scanning.length < 4) g.scanRegion(i);
+      }
+      for (const id of PLAN) if (g.canResearch(id).ok) { g.startResearch(id); break; }
+
+      const netEnergy = S.power.production - S.power.consumption;
+      if (netEnergy < 14) {
+        if (!tryBuildMany('fusion', 1, () => 1)) {
+          if (!tryBuildMany('geothermal', 1, (i) => R.geothermal[i])) {
+            tryBuildMany('solar', 2, (i) => 1 - Math.abs(R.latitude[i]));
+          }
+        }
+      }
+      if (count('mine') < 16) tryBuildMany('mine', 1, (i) => R.minerals[i]);
+      if (count('science_station') < 12) tryBuildMany('science_station', 1, (i) => R.anomaly[i] * 2 + R.radiation[i]);
+      if (count('depot') < 5) tryBuildMany('depot', 1, (i) => -i);
+      const waterScore = (i) => R.ice[i] + R.water[i] / BAL.water.basinDepth + R.moisture[i];
+      if (count('ice_extractor') < 16 && (S.flux.water <= 0.5 || S.resources.water < 250)) {
+        tryBuildMany('ice_extractor', 1, waterScore);
+      }
+      if (count('refinery') < 5) tryBuildMany('refinery', 1, (i) => R.minerals[i]);
+
+      if (gl.temperature < TARGET_T.low) {
+        if (count('ghg_factory') < 12) tryBuildMany('ghg_factory', 1, (i) => 1 - R.pollution[i]);
+        if (count('polar_melter') < 8) tryBuildMany('polar_melter', 1, (i) => R.ice[i]);
+        if (count('orbital_mirror') < 8 && gl.temperature < TARGET_T.low - 2) {
+          tryBuildMany('orbital_mirror', 1, (i) => -i);
+        }
+      }
+      if (gl.temperature > TARGET_T.high || (gl.dTemperature > 1.5 && gl.temperature > TARGET_T.low)) {
+        if (!demolishSome('orbital_mirror', 1)) {
+          if (!demolishSome('ghg_factory', 1)) demolishSome('polar_melter', 1);
+        }
+      }
+      if (gl.temperature > TARGET_T.panic) { demolishSome('orbital_mirror', 2); demolishSome('ghg_factory', 2); }
+
+      if (gl.pressure < 82 && count('atmo_processor') < 14) {
+        tryBuildMany('atmo_processor', 1, (i) => R.geothermal[i]);
+      }
+      if (gl.pressure > 30 && gl.oxygen < 19 && gl.co2 > 12 && count('o2_generator') < 12) {
+        tryBuildMany('o2_generator', 1, (i) => -i);
+      }
+      if (gl.co2 < 7 && count('o2_generator') > 0) demolishSome('o2_generator', 2);
+
+      if (gl.temperature > -22 && count('biodome') < 12) {
+        tryBuildMany('biodome', 1, (i) => R.habitability[i] * 2 + R.moisture[i]);
+      }
+      if (gl.biomass > 3 && count('seeder') < 10) tryBuildMany('seeder', 1, (i) => R.vegetation[i]);
+      if (gl.stability < 78 && count('climate_stabilizer') < 5) {
+        tryBuildMany('climate_stabilizer', 1, (i) => -i);
+      }
+      if (count('colony') < 8) {
+        tryBuildMany('colony', 1, (i) => R.habitability[i] * 2 + R.vegetation[i]
+          + Math.min(1, R.water[i] / BAL.water.basinDepth + R.moisture[i]));
+      }
+    }
+
+    const days = years * 365;
+    let victoryDay = null;
+    for (let d = 0; d < days; d++) {
+      g._tick(1, d);
+      if (d % 20 === 0) play();
+      if (S.progress.victory && victoryDay === null) victoryDay = d;
+    }
+
+    g.setSpeed(0);          // la simulation est gelée : l'image ne dérive plus
+    g.markAllDirty();
+
+    const kinds = {};
+    for (const b of S.buildings) kinds[b.type] = (kinds[b.type] || 0) + 1;
+    return {
+      built: S.buildings.length, kinds, day: S.time.day | 0,
+      victoryYear: victoryDay === null ? null : +(victoryDay / 365).toFixed(1),
+    };
+  }, YEARS);
+  console.log(`  (partie jouée : ${terra.built} bâtiments, jour ${terra.day}, `
+    + `victoire an ${terra.victoryYear ?? '—'})`);
+  console.log('   types : ' + Object.entries(terra.kinds)
+    .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}×${n}`).join(', '));
   await page.waitForTimeout(2500);   // le lissage des globales converge
 
   /* --- c : monde vivant, même cadrage que a ---------------------------- */
@@ -311,29 +374,49 @@ async function run() {
   await aim({ dTheta: -0.35, dPhi: 0.20, dist: 1.6 });
   await shot('i-zoom');
 
-  /* --- j : contre-épreuve, planète vierge au même zoom ------------------ */
-  if (wanted('j-zoom-vierge')) {
-    await page.evaluate(() => window.TERRA.game.newGame({ seed: 808 }));
-    await page.waitForTimeout(1400);
-    await hideUI(true);
-    await aim({ dTheta: -0.35, dPhi: 0.20, dist: 1.6 });
-    await shot('j-zoom-vierge');
+  /* --- l : les BÂTIMENTS à trois distances ------------------------------ */
+  // C'est la série qui juge la couche StructureLayer : pleine taille (l1),
+  // début de l'atténuation (l2) et vue d'ensemble (l3, où il ne doit plus
+  // rester qu'une planète). Le limbe est cadré exprès : c'est là qu'un
+  // bâtiment mal ancré se met à flotter.
+  for (const [name, cfg] of [
+    ['l1-batiments-pres', { dTheta: -0.75, dPhi: 0.30, dist: 1.85 }],
+    ['l2-batiments-limbe', { dTheta: -1.38, dPhi: 0.30, dist: 2.10 }],
+    ['l3-batiments-loin', { dTheta: -0.90, dPhi: 0.18, dist: 3.05 }],
+    // Côté nuit rapproché : c'est la seule image qui juge l'émissif (fenêtres,
+    // voyants). Il doit se voir, sans transformer les bâtiments en lampions.
+    ['l4-batiments-nuit', { dTheta: Math.PI - 0.55, dPhi: 0.12, dist: 1.95 }],
+  ]) {
+    await aim(cfg);
+    await shot(name);
   }
 
-  /* --- diagnostic chiffré : c'est lui qui permet de caler les seuils ---- */
+  /* --- diagnostic chiffré : AVANT toute réinitialisation ---------------- */
+  // (il portait autrefois sur la partie vierge relancée pour j-zoom-vierge,
+  //  et ne décrivait donc pas du tout l'état photographié.)
   const diag = await page.evaluate(() => {
     const g = window.TERRA.game, sc = window.TERRA.scene, R = g.regions;
     const mean = (a) => { let s = 0; for (let i = 0; i < R.count; i++) s += a[i]; return s / R.count; };
     const max = (a) => { let m = 0; for (let i = 0; i < R.count; i++) m = Math.max(m, a[i]); return m; };
+    const above = (a, t) => { let n = 0; for (let i = 0; i < R.count; i++) if (a[i] > t) n++; return +(n / R.count).toFixed(3); };
     return {
       globals: { ...g.state.globals },
       smoothed: { ...sc.smoothed },
       region: {
         water: +mean(R.water).toFixed(3), waterMax: +max(R.water).toFixed(3),
-        ice: +mean(R.ice).toFixed(3),
-        vegetation: +mean(R.vegetation).toFixed(3),
+        waterAbove05: above(R.water, 0.05),
+        ice: +mean(R.ice).toFixed(3), iceAbove30: above(R.ice, 0.30),
+        vegetation: +mean(R.vegetation).toFixed(3), vegAbove30: above(R.vegetation, 0.30),
         moisture: +mean(R.moisture).toFixed(3),
         elevation: +mean(R.elevation).toFixed(3),
+        populationMax: Math.round(max(R.population)),
+        // Températures RÉGIONALES : c'est sur elles que travaille la rampe
+        // thermique, alors qu'elle est centrée sur la moyenne GLOBALE. Si les
+        // deux divergent, la couche est biaisée — d'où ce contrôle.
+        tempMin: +Math.min(...R.temperature).toFixed(1),
+        tempMean: +mean(R.temperature).toFixed(1),
+        tempMax: +Math.max(...R.temperature).toFixed(1),
+        tempBelow0: above(R.temperature, 0) !== undefined ? +(1 - above(R.temperature, 0)).toFixed(3) : 0,
       },
       ocean: { visible: sc.planet.ocean.visible, scale: +sc.planet.ocean.scale.x.toFixed(4) },
       clouds: { visible: sc.clouds.mesh.visible, coverage: +sc.clouds.uniforms.uCoverage.value.toFixed(3) },
@@ -341,7 +424,94 @@ async function run() {
       stats: { ...sc.stats },
     };
   });
-  console.log('\nDIAGNOSTIC :\n' + JSON.stringify(diag, null, 1));
+  console.log('\nDIAGNOSTIC (état RÉELLEMENT joué) :\n' + JSON.stringify(diag, null, 1));
+
+  /* --- j : contre-épreuve, planète vierge au même zoom ------------------ */
+  if (wanted('j-zoom-vierge')) {
+    await page.evaluate((seed) => window.TERRA.game.newGame({ seed }), SEED);
+    await page.waitForTimeout(1400);
+    await hideUI(true);
+    await aim({ dTheta: -0.35, dPhi: 0.20, dist: 1.6 });
+    await shot('j-zoom-vierge');
+  }
+
+  /* --- m : VITRINE des 17 modèles --------------------------------------- */
+  // Catalogue de rendu : un exemplaire de chaque type sur des cellules
+  // voisines, éclairage rasant. C'est la seule image qui permet de juger si
+  // les silhouettes restent distinguables les unes des autres. Les entrées
+  // sont poussées directement dans state.buildings : on photographie ici la
+  // COUCHE DE RENDU, pas une situation de jeu (aucune règle n'est contournée
+  // ailleurs dans cet outil).
+  if (wanted('m-vitrine')) {
+    const vit = await page.evaluate(() => {
+      const g = window.TERRA.game, sc = window.TERRA.scene, R = g.regions;
+      g.newGame({ seed: 4242 });
+      g.debug.revealAll();
+      g.setSpeed(0);
+
+      // Cellule de référence : à 45° de l'étoile → lumière rasante, les
+      // volumes se lisent. (Face à l'étoile, tout est plat.)
+      const s = sc.sunDirection;
+      let ux = -s.y, uy = s.x, uz = 0;
+      const ul = Math.hypot(ux, uy, uz) || 1;
+      ux /= ul; uy /= ul; uz /= ul;
+      const c = Math.cos(0.72), si = Math.sin(0.72);
+      const dx = s.x * c + ux * si, dy = s.y * c + uy * si, dz = s.z * c + uz * si;
+      let best = 0, bestDot = -2;
+      for (let i = 0; i < R.count; i++) {
+        const d = R.positions[i * 3] * dx + R.positions[i * 3 + 1] * dy + R.positions[i * 3 + 2] * dz;
+        if (d > bestDot) { bestDot = d; best = i; }
+      }
+
+      // Parcours en largeur : autant de cellules voisines que de types.
+      const list = ['mine', 'refinery', 'depot', 'solar', 'geothermal', 'fusion',
+        'science_station', 'ice_extractor', 'ghg_factory', 'atmo_processor',
+        'o2_generator', 'polar_melter', 'orbital_mirror', 'climate_stabilizer',
+        'biodome', 'seeder', 'colony'];
+      const seen = new Set([best]);
+      const order = [best];
+      for (let h = 0; h < order.length && order.length < list.length; h++) {
+        for (const n of R.neighbors(order[h])) {
+          if (!seen.has(n)) { seen.add(n); order.push(n); if (order.length >= list.length) break; }
+        }
+      }
+      g.state.buildings.length = 0;
+      list.forEach((t, k) => {
+        g.state.buildings.push({ id: 'vit' + k, type: t, region: order[k % order.length], active: true });
+      });
+      sc.syncBuildings(g.state);
+
+      // VUE OBLIQUE. Viser le centre de la planète donne fatalement une vue
+      // en plan (des toits, aucune silhouette). On vise donc la CELLULE, et on
+      // place la caméra à 50° de sa verticale locale : c'est l'angle auquel un
+      // joueur regarde ses bâtiments, et le seul qui montre les volumes.
+      const cc = sc.controls;
+      cc.autoRotate = false; cc._focus = null; cc.vTheta = 0; cc.vPhi = 0;
+      const p = R.positions;
+      const nx = p[best * 3], ny = p[best * 3 + 1], nz = p[best * 3 + 2];
+      // On s'écarte PERPENDICULAIREMENT au plan qui contient l'étoile : la
+      // lumière arrive alors de côté et sculpte les volumes. En s'écartant vers
+      // l'étoile on obtiendrait au contraire un éclairage frontal, tout plat.
+      let tx = s.x - nx * (s.x * nx + s.y * ny + s.z * nz);
+      let ty = s.y - ny * (s.x * nx + s.y * ny + s.z * nz);
+      let tz = s.z - nz * (s.x * nx + s.y * ny + s.z * nz);
+      const tl = Math.hypot(tx, ty, tz) || 1;
+      tx /= tl; ty /= tl; tz /= tl;
+      const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx;
+      const ca = Math.cos(0.87), sa = Math.sin(0.87);   // 50°
+      const vx = nx * ca + bx * sa, vy = ny * ca + by * sa, vz = nz * ca + bz * sa;
+      cc.theta = Math.atan2(vx, vz);
+      cc.phi = Math.max(0.02, Math.min(Math.PI - 0.02, Math.acos(Math.max(-1, Math.min(1, vy)))));
+      cc.distance = 0.95; cc.targetDistance = 0.95;
+      const cr = sc.planet.cellRadius[best];
+      cc.target.set(nx * cr, ny * cr, nz * cr);
+      cc._applyCamera();
+      return { region: best, placed: list.length, cells: order.length };
+    });
+    console.log(`  (vitrine : ${vit.placed} modèles sur ${vit.cells} cellules)`);
+    await shot('m-vitrine', 2200);
+  }
+
 
   const stats = await page.evaluate(() => ({ ...window.TERRA.scene.stats }));
   await browser.close();

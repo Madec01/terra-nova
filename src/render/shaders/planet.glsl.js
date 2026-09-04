@@ -223,6 +223,11 @@ uniform float uLayerBlend;
 uniform float uSelected;
 uniform float uHovered;
 uniform float uEdgeStrength;
+/**
+ * Moyenne des températures RÉGIONALES (°C), lissée, fournie par SceneManager.
+ * Elle sert de CENTRE à la rampe thermique : voir layerColor(), couche 1.
+ */
+uniform float uTempMean;
 
 varying vec3 vWorld;
 varying vec3 vObject;
@@ -236,6 +241,22 @@ varying vec4 vInfo;
 varying vec4 vAux;
 
 /* --- rampes de couleur des couches de données --------------------------- */
+
+/** Demi-fenêtre de la rampe thermique, en °C autour de la moyenne. */
+const float TEMP_WINDOW = 20.0;
+
+/**
+ * tanh() n'est garanti qu'à partir de GLSL ES 3.00 ; on l'écrit à la main pour
+ * ne dépendre d'aucune version. Le clamp évite l'explosion de exp().
+ */
+float tnTanh(float x) {
+  x = clamp(x, -8.0, 8.0);
+  float e = exp(2.0 * x);
+  return (e - 1.0) / (e + 1.0);
+}
+
+/** Température de la cellule en °C, telle qu'encodée dans aData.x. */
+float tnCelsius(float packed) { return packed * 200.0 - 120.0; }
 
 vec3 ramp5(float t, vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4) {
   t = clamp(t, 0.0, 1.0) * 4.0;
@@ -358,13 +379,27 @@ vec3 naturalColor(float ice, float water, float grain, float ragged, float macro
 vec3 layerColor(int layer, float ice, float water, float minerals, float geo,
                 float grain, float ragged, float macro, float seed, float alt) {
   if (layer == 1) {
-    // Température
-    return ramp5(vData.x,
-      vec3(0.09, 0.16, 0.36),
-      vec3(0.16, 0.33, 0.62),
-      vec3(0.28, 0.66, 0.78),
-      vec3(0.92, 0.86, 0.55),
-      vec3(0.74, 0.16, 0.14));
+    // TEMPÉRATURE — fenêtre glissante autour de la moyenne planétaire.
+    //
+    // aData.x code clamp01((T + 120) / 200) : la rampe brute couvrait donc
+    // 200 °C alors qu'un monde en cours de terraformation tient dans une
+    // vingtaine de degrés. Résultat : une carte uniformément bleue, qui
+    // n'apprenait rien. On reconstruit ici les °C, puis on lit l'ÉCART à la
+    // moyenne à travers une tanh : les contrastes régionaux occupent toute la
+    // rampe à toutes les époques (planète gelée à −52 °C comme monde tempéré
+    // à +21 °C), sans jamais saturer complètement.
+    float tC = tnCelsius(vData.x);
+    float dev = tnTanh((tC - uTempMean) / TEMP_WINDOW);
+    // Une part d'ABSOLU (faible) conserve l'information « ce monde est
+    // globalement glacé / globalement tempéré » d'une époque à l'autre.
+    float bias = tnTanh(uTempMean / 55.0);
+    float t = 0.5 + 0.5 * clamp(dev * 0.80 + bias * 0.20, -1.0, 1.0);
+    return ramp5(t,
+      vec3(0.07, 0.13, 0.34),
+      vec3(0.14, 0.32, 0.62),
+      vec3(0.30, 0.68, 0.74),
+      vec3(0.94, 0.84, 0.46),
+      vec3(0.76, 0.15, 0.12));
   } else if (layer == 2) {
     // Eau : sec → humide → eau libre, blanchi par la glace
     vec3 c = ramp3(vData.y, vec3(0.34, 0.27, 0.20), vec3(0.26, 0.40, 0.42), vec3(0.10, 0.42, 0.66));
@@ -469,6 +504,22 @@ void main() {
   float border = smoothstep(0.80, 0.995, max(vEdge, radial * 0.92));
   float borderAmount = uEdgeStrength * mix(0.07, 1.0, dataMode) * border;
   albedo *= 1.0 - borderAmount * 0.55;
+
+  /* --- REPÈRE 0 °C de la couche température ---------------------------- */
+  // La rampe est RELATIVE (fenêtre glissante) : sans repère absolu, le joueur
+  // ne saurait plus où passe le gel. Une cellule est constante en couleur, donc
+  // aucune isotherme ne peut être tracée dans son intérieur ; on marque donc
+  // les cellules sous 0 °C d'une hachure d'écran — la convention cartographique
+  // du gel, et le seul motif qui ne crépite jamais puisqu'il est en pixels.
+  float tempMode = max(
+    uLayerFrom == 1 ? 1.0 - clamp(uLayerBlend, 0.0, 1.0) : 0.0,
+    uLayerTo == 1 ? clamp(uLayerBlend, 0.0, 1.0) : 0.0);
+  if (tempMode > 0.002) {
+    float frozen = 1.0 - smoothstep(-1.0, 1.0, tnCelsius(vData.x));
+    float h = fract((gl_FragCoord.x + gl_FragCoord.y) * 0.0715);   // ~14 px
+    float stripe = smoothstep(0.40, 0.48, h) * (1.0 - smoothstep(0.52, 0.60, h));
+    albedo *= 1.0 - 0.34 * stripe * frozen * tempMode;
+  }
 
   /* --- régions non découvertes ----------------------------------------- */
   // « Données manquantes » sur un écran de contrôle : gris-bleu très sombre,

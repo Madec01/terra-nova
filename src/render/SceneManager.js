@@ -139,6 +139,8 @@ export class SceneManager {
       waterCoverage: BALANCE.start.globals.waterCoverage,
       insolation: BALANCE.start.globals.insolation,
       stability: BALANCE.start.globals.stability,
+      /** Moyenne des températures RÉGIONALES (°C) : centre de la couche thermique. */
+      regionTemp: BALANCE.start.globals.temperature,
     };
     this._smoothInit = false;
 
@@ -238,6 +240,14 @@ export class SceneManager {
     // l'atmosphère, les nuages et les bâtiments : une seule source de vérité.
     this.planet = new PlanetMesh(regions, state, this.shared);
     this.scene.add(this.planet.object3D);
+
+    // uTempMean : centre de la fenêtre glissante de la couche température
+    // (voir planet.glsl.js, layerColor couche 1). L'uniform est ajouté ICI et
+    // non dans PlanetMesh parce qu'il ne décrit pas la planète mais l'état de
+    // jeu lissé, dont SceneManager est déjà la seule source. Three lit
+    // material.uniforms au moment du téléversement : ajouter la clé avant le
+    // premier rendu suffit.
+    this.planet.uniforms.uTempMean = { value: this.smoothed.regionTemp };
 
     this.overlay = new SelectionOverlay(this.planet);
     this.scene.add(this.overlay.object3D);
@@ -429,6 +439,21 @@ export class SceneManager {
     // Une étoile mieux exploitée (miroirs) éclaire plus blanc.
     const warm = clamp01((s.insolation - 1) * 0.6);
     this.shared.uSunColor.value.setRGB(1.0, 0.955 + warm * 0.03, 0.90 + warm * 0.08);
+
+    // La rampe thermique est centrée sur la moyenne des températures
+    // RÉGIONALES, pas sur globals.temperature : les deux diffèrent d'une
+    // dizaine de degrés (mesuré : 10,7 °C contre 20,7 °C sur une partie
+    // gagnée), et centrer sur la seconde décalerait toute la carte vers le
+    // bleu. 642 additions par frame, coût négligeable.
+    const RT = this.regions && this.regions.temperature;
+    if (RT && RT.length) {
+      let sum = 0;
+      for (let i = 0; i < RT.length; i++) sum += RT[i];
+      s.regionTemp = damp(s.regionTemp, sum / RT.length, GLOBAL_LAMBDA, k);
+    }
+    if (this.planet && this.planet.uniforms.uTempMean) {
+      this.planet.uniforms.uTempMean.value = s.regionTemp;
+    }
 
     this.atmosphere.setState(s.pressure, s.oxygen);
     // Nuages chargés quand le climat se dégrade.
