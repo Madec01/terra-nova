@@ -111,7 +111,17 @@ state = {
   resources: { energy, materials, science, biomass, water },
   flux:      { energy, materials, science, biomass, water },  // dernier delta/jour calculé
   power:     { production, consumption, satisfaction /*0..1*/ },
-  globals:   { temperature, pressure, oxygen, co2, waterCoverage, biomass, stability, insolation },
+  globals:   {
+    // Réservoirs de gaz, en kPa — c'est l'état FAISANT AUTORITÉ.
+    pCO2, pO2, pInert,
+    // Dérivés à chaque tick depuis les réservoirs ci-dessus, jamais écrits
+    // directement : pressure = pCO2 + pO2 + pInert, co2 = 100*pCO2/pressure…
+    // Conséquence : co2 + oxygen <= 100 est vrai par construction.
+    pressure, co2, oxygen,
+    temperature, waterCoverage, biomass, stability, insolation, population,
+    cloudCover, iceCover, habitability,
+    dTemperature, dPressure, dOxygen, dBiomass,   // dérivées annuelles
+  },
   contributions: { temperature: [{label, value}], pressure:[...], oxygen:[...], stability:[...] },
   buildings: [ { id, type, region, day, active, level } ],
   tech:      { unlocked:[techId], current: techId|null, progress: number },
@@ -135,9 +145,13 @@ game.selectRegion(id|null) ; game.selectedRegion
 game.canBuild(type, regionId) -> { ok:boolean, reason?:string }
 game.build(type, regionId) -> boolean
 game.demolish(buildingId) -> boolean
-game.startResearch(techId) -> boolean
+game.startResearch(techId) -> boolean   // COMMENCE la recherche (progressive)
+game.cancelResearch()                   // abandonne, remboursement partiel
+game.researchEta(techId) -> number|null // jours restants estimés
 game.canResearch(techId) -> { ok, reason? }
-game.scanRegion(regionId) -> boolean
+game.scanRegion(regionId) -> boolean    // met en file si aucune sonde libre
+game.cancelScan(regionId) -> boolean
+game.setAutoExplore(v) ; game.autoExplore
 game.availableBuildings() -> [buildingDef]  // débloqués par la recherche
 game.victoryReport() -> [ { key, label, value, target, ok, format } ]
 game.debug = { addResources(n), addScience(n), heat(n), addWater(n), addBiomass(n), revealAll() }
@@ -197,3 +211,39 @@ Définition d'un bâtiment :
   outputScale(region, state) -> multiplicateur (optionnel, fonction pure)
 }
 ```
+
+
+## 8. Effets des bâtiments : deux canaux distincts
+
+La distinction est essentielle et a été introduite après un défaut d'équilibrage :
+les miroirs orbitaux accumulaient de l'ensoleillement sans fin, ce qui rendait la
+surchauffe irréversible.
+
+| canal | sémantique | multiplié par `dt` | exemple |
+|---|---|---|---|
+| `global` | un **taux** par jour | oui | usine à gaz : `co2` en kPa/jour |
+| `globalStatic` | un **niveau** tant que le bâtiment est actif | non | miroir orbital : `insolation` |
+
+Un effet `globalStatic` est réversible : démonter le bâtiment retire l'effet.
+C'est ce qui permet au joueur de refroidir une planète qu'il a trop chauffée.
+Un bâtiment inactif (panne, énergie manquante) ne contribue à aucun des deux.
+
+Sémantique des trois effets atmosphériques, tous en kPa/jour :
+
+- `global.co2` — CO₂ **ajouté** (dégazage, halocarbures)
+- `global.pressure` — gaz **inertes ajoutés** (azote, argon)
+- `global.oxygen` — CO₂ **converti** en O₂ (le carbone est retiré, pas cree)
+
+## 9. Instruments de vérification
+
+| outil | ce qu'il répond |
+|---|---|
+| `npm test` | les modèles sont-ils corrects et non régressés ? |
+| `node tools/smoke.mjs` | le jeu se lance-t-il et se joue-t-il sans erreur ? |
+| `node tools/balance-probe.mjs --multi 6 70` | la partie est-elle gagnable ? |
+| `node tools/balance-probe.mjs --bad 6 70` | le joueur imprudent perd-il ? |
+| `node tools/visual-check.mjs` | à quoi ressemble le jeu, réellement ? |
+| `node tools/playtest.mjs` | que subit le joueur, clic par clic ? |
+
+Les trois derniers produisent des captures d'écran : elles sont faites pour être
+REGARDÉES, pas seulement générées.
