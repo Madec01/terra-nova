@@ -5,6 +5,7 @@
  * Règle d'architecture : c'est le SEUL fichier qui connaît les trois à la fois.
  */
 import { Game } from './core/Game.js';
+import { PLANET_TYPE_LIST } from './planet/PlanetGenerator.js';
 import { SceneManager } from './render/SceneManager.js';
 import { UIManager } from './ui/UIManager.js';
 import { AudioManager } from './audio/AudioManager.js';
@@ -31,6 +32,9 @@ function boot() {
   const game = new Game();
   const audio = new AudioManager({ basePath: './public/audio/' });
   game.audio = audio;
+  // Le menu d'accueil propose les types de monde sans importer le générateur
+  // (l'interface n'a pas le droit de dépendre de la couche planète).
+  game.planetPresets = PLANET_TYPE_LIST;
 
   let scene;
   try {
@@ -83,15 +87,14 @@ function boot() {
   /*  Interaction avec la planète                                        */
   /* ------------------------------------------------------------------ */
 
+  // L'interface n'écoute pas le canvas : elle réagit à `region:selected`.
+  // Un clic sur la planète se contente donc de sélectionner ; c'est l'UI qui
+  // décide ensuite s'il s'agit d'une consultation ou d'un placement.
   scene.onRegionClick = (regionId) => {
     audio.unlock();
-    if (ui.handleRegionClick && ui.handleRegionClick(regionId)) return; // mode construction
     game.selectRegion(regionId);
   };
-  scene.onRegionHover = (regionId) => {
-    scene.setHovered(regionId);
-    if (ui.handleRegionHover) ui.handleRegionHover(regionId);
-  };
+  scene.onRegionHover = (regionId) => scene.setHovered(regionId);
 
   /* ------------------------------------------------------------------ */
   /*  Boucle principale                                                  */

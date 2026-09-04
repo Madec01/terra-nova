@@ -17,6 +17,36 @@
  *                      négative naturelle du système.
  *
  * Tout est borné et lissé : aucune valeur ne doit pouvoir devenir NaN.
+ *
+ * ---------------------------------------------------------------------------
+ *  MODÈLE ATMOSPHÉRIQUE — PRESSIONS PARTIELLES
+ * ---------------------------------------------------------------------------
+ *  L'atmosphère n'est PAS décrite par deux pourcentages indépendants (c'était
+ *  le bug historique : `co2` et `oxygen` pouvaient valoir 100 % en même temps).
+ *  Elle est décrite par trois réservoirs de gaz, en kPa, portés par
+ *  `state.globals` (donc sauvegardés) :
+ *
+ *      pCO2   — dioxyde de carbone
+ *      pO2    — dioxygène
+ *      pInert — azote + argon (« gaz inertes »)
+ *
+ *  Tout le reste en est DÉRIVÉ, jamais modifié directement :
+ *
+ *      pressure = pCO2 + pO2 + pInert
+ *      co2      = 100 * pCO2 / pressure
+ *      oxygen   = 100 * pO2  / pressure
+ *
+ *  Par construction `co2 + oxygen <= 100` : une composition atmosphérique
+ *  incohérente est devenue impossible à représenter.
+ *
+ *  Conséquences de game design voulues :
+ *   - craquer du CO₂ en O₂ (générateur d'oxygène) DÉPLACE de la matière d'un
+ *     réservoir à l'autre : rendre l'air respirable assèche l'effet de serre
+ *     et refroidit la planète. C'est la tension centrale de la fin de partie ;
+ *   - la photosynthèse séquestre le carbone dans la biomasse : elle retire
+ *     plus de CO₂ qu'elle ne rend d'O₂, donc elle refroidit aussi ;
+ *   - épaissir l'atmosphère (dégazage inerte) réchauffe sans toucher au
+ *     rapport CO₂/O₂.
  */
 import { BALANCE } from '../data/balance.js';
 import { clamp, clamp01, smoothstep } from '../utils/math.js';
@@ -50,11 +80,12 @@ export class ClimateSystem {
       'Pression atmosphérique', 'Vapeur d’eau', 'Chaleur industrielle',
     ], '°C');
     this._rowsP = this._makeRows([
-      'Dégazage industriel', 'Sublimation des glaces', 'Fuite atmosphérique',
+      'Dégazage industriel', 'Sublimation des glaces', 'Séquestration biologique',
+      'Fuite atmosphérique',
     ], 'kPa/an');
     this._rowsO = this._makeRows([
-      'Photosynthèse', 'Électrolyse industrielle',
-    ], '%/an');
+      'Photosynthèse', 'Craquage industriel du CO₂',
+    ], 'kPa/an');
     this._rowsS = this._makeRows([
       'Récupération naturelle', 'Biomasse', 'Technologies', 'Installations',
       'Variation de température', 'Variation de pression', 'Pollution',
@@ -68,10 +99,64 @@ export class ClimateSystem {
   reset(ctx) {
     this._alloc(ctx);
     const g = ctx.state.globals;
+    // Nouvelle partie OU sauvegarde antérieure au modèle en pressions
+    // partielles : on reconstruit les trois réservoirs depuis
+    // BALANCE.start.globals.pressure/co2/oxygen, qui restent la source de vérité.
+    this._ensureAtmosphere(g);
+    this._syncAtmosphere(g);
     this._prev.t = g.temperature;
     this._prev.p = g.pressure;
     this._prev.o = g.oxygen;
     this._prev.b = g.biomass;
+  }
+
+  /* =================================================================== */
+  /*  ATMOSPHÈRE — réservoirs et dérivés                                 */
+  /* =================================================================== */
+
+  /**
+   * Rétrocompatibilité : si les pressions partielles sont absentes (état
+   * fraîchement créé par GameState, ou sauvegarde d'une version antérieure),
+   * on les dérive de `pressure` / `co2` / `oxygen`, qui eux existent toujours.
+   * L'inerte absorbe le reliquat (azote + argon).
+   */
+  _ensureAtmosphere(G) {
+    if (Number.isFinite(G.pCO2) && Number.isFinite(G.pO2) && Number.isFinite(G.pInert)) return;
+    const S = BALANCE.start.globals;
+    const p = Number.isFinite(G.pressure) ? Math.max(0, G.pressure) : S.pressure;
+    const co2 = Number.isFinite(G.co2) ? clamp(G.co2, 0, 100) : S.co2;
+    const o2 = Number.isFinite(G.oxygen) ? clamp(G.oxygen, 0, 100) : S.oxygen;
+    G.pCO2 = p * co2 / 100;
+    G.pO2 = p * o2 / 100;
+    G.pInert = Math.max(0, p - G.pCO2 - G.pO2);
+  }
+
+  /**
+   * Recalcule les grandeurs DÉRIVÉES (`pressure`, `co2`, `oxygen`) à partir des
+   * trois réservoirs, après avoir appliqué les bornes de sécurité.
+   * Les bornes de BALANCE.atmosphere portent sur la pression TOTALE : on les
+   * répartit proportionnellement pour ne jamais altérer la composition.
+   */
+  _syncAtmosphere(G) {
+    const A = BALANCE.atmosphere;
+    if (!Number.isFinite(G.pCO2) || G.pCO2 < 0) G.pCO2 = 0;
+    if (!Number.isFinite(G.pO2) || G.pO2 < 0) G.pO2 = 0;
+    if (!Number.isFinite(G.pInert) || G.pInert < 0) G.pInert = 0;
+
+    let p = G.pCO2 + G.pO2 + G.pInert;
+    if (!(p > 0)) {
+      // Atmosphère intégralement perdue : on repose le plancher sur l'inerte.
+      G.pCO2 = 0; G.pO2 = 0; G.pInert = A.minPressure;
+      p = A.minPressure;
+    } else if (p < A.minPressure || p > A.maxPressure) {
+      const target = clamp(p, A.minPressure, A.maxPressure);
+      const k = target / p;
+      G.pCO2 *= k; G.pO2 *= k; G.pInert *= k;
+      p = target;
+    }
+    G.pressure = p;
+    G.co2 = 100 * G.pCO2 / p;
+    G.oxygen = 100 * G.pO2 / p;
   }
 
   _alloc(ctx) {
@@ -129,22 +214,51 @@ export class ClimateSystem {
     const C = BALANCE.climate;
     const A = BALANCE.atmosphere;
 
-    /* --- 1. Effets planétaires des bâtiments ---------------------------- */
-    if (dt > 0) {
-      G.co2 = clamp(G.co2 + acc.global.co2 * dt, 0, 100);
-      G.oxygen = clamp(G.oxygen + acc.global.oxygen * dt, 0, 100);
-      G.pressure = G.pressure + acc.global.pressure * dt;
-      G.insolation = clamp(G.insolation + acc.global.insolation * dt, 0, C.maxInsolation);
+    this._ensureAtmosphere(G);
 
-      // Échanges biosphère ↔ atmosphère (la biomasse date du tick précédent).
+    /* --- 0. Ensoleillement : un NIVEAU, pas un taux --------------------- */
+    // Les miroirs orbitaux déposent leur effet dans `acc.staticGlobal`, qui
+    // est simplement la SOMME des miroirs actifs. L'ensoleillement est donc
+    // recalculé de zéro à chaque tick : démonter un miroir refroidit
+    // immédiatement, le levier est réversible et lisible.
+    const staticIns = (acc.staticGlobal && acc.staticGlobal.insolation) || 0;
+    G.insolation = clamp(1 + staticIns * ctx.tech.globalEffectMultiplier, 0, C.maxInsolation);
+
+    /* --- 1. Effets planétaires des bâtiments ---------------------------- */
+    // Sémantique (voir buildings.js) :
+    //   global.co2      → kPa de CO₂ AJOUTÉS par jour (dégazage, halocarbures)
+    //   global.pressure → kPa d'INERTES ajoutés par jour (dégazage du régolithe)
+    //   global.oxygen   → kPa de CO₂ CONVERTIS en O₂ par jour (craquage)
+    let cracked = 0, eaten = 0, released = 0;
+    if (dt > 0) {
+      G.pCO2 = Math.max(0, G.pCO2 + acc.global.co2 * dt);
+      G.pInert = Math.max(0, G.pInert + acc.global.pressure * dt);
+
+      // Craquage industriel : conversion STRICTE, rien n'est créé ni détruit.
+      // Elle s'arrête d'elle-même quand il n'y a plus de CO₂ à craquer.
+      const wanted = acc.global.oxygen * dt;
+      cracked = wanted > 0 ? Math.min(wanted, G.pCO2) : 0;
+      G.pCO2 -= cracked;
+      G.pO2 += cracked;
+
+      // Photosynthèse (la biomasse date du tick précédent) : conversion
+      // CO₂ → O₂ elle aussi limitée par le CO₂ disponible. Le carbone étant
+      // séquestré dans la biomasse, l'O₂ rendu est INFÉRIEUR au CO₂ consommé
+      // (oxygenPerBiomass < co2PerBiomass) : la biosphère refroidit la planète.
       const bio = clamp(G.biomass, 0, BALANCE.biosphere.globalScale);
-      G.oxygen = clamp(G.oxygen + A.oxygenPerBiomass * bio * dt, 0, 100);
-      G.co2 = clamp(G.co2 - A.co2PerBiomass * bio * dt, 0, 100);
+      if (bio > 0) {
+        eaten = Math.min(G.pCO2, A.co2PerBiomass * bio * dt);
+        released = Math.min(eaten, A.oxygenPerBiomass * bio * dt);
+        G.pCO2 -= eaten;
+        G.pO2 += released;
+      }
 
       /* --- 2. Fuite atmosphérique ---------------------------------------- */
-      G.pressure -= G.pressure * A.leak * dt;
+      // Elle emporte les trois réservoirs dans les mêmes proportions.
+      const keep = Math.max(0, 1 - A.leak * dt);
+      G.pCO2 *= keep; G.pO2 *= keep; G.pInert *= keep;
     }
-    G.pressure = clamp(G.pressure, A.minPressure, A.maxPressure);
+    this._syncAtmosphere(G);
 
     /* --- 3. Couvertures moyennes (pondérées par l'aire) ------------------ */
     let iceSum = 0, waterSum = 0, moistSum = 0, vegSum = 0, pollSum = 0, areaSum = 0;
@@ -187,9 +301,10 @@ export class ClimateSystem {
     G.albedo = albedo;
 
     /* --- 5. Effet de serre ---------------------------------------------- */
-    // C'est la MASSE de CO₂ qui compte : pression partielle en kPa.
-    const co2Partial = (G.co2 / 100) * G.pressure;
-    const ghCO2 = C.greenhouseCO2 * (co2Partial / (co2Partial + C.greenhouseCO2Half));
+    // C'est la MASSE de CO₂ qui compte, pas son pourcentage : `pCO2` EST déjà
+    // la pression partielle en kPa, on la lit directement (saturation
+    // logarithmique classique : les premiers kPa comptent beaucoup plus).
+    const ghCO2 = C.greenhouseCO2 * (G.pCO2 / (G.pCO2 + C.greenhouseCO2Half));
     const ghPressure = C.greenhousePressure * (G.pressure / (G.pressure + C.greenhousePressureHalf));
 
     // Vapeur d'eau : nécessite de l'eau LIQUIDE (donc de la pression) et de la
@@ -248,9 +363,13 @@ export class ClimateSystem {
     }
 
     /* --- 10. Hydrologie -------------------------------------------------- */
+    // La glace des calottes est majoritairement du CO₂ solide : ce qu'elle
+    // sublime alimente donc le réservoir de CO₂ (rétroaction chaud → dégel →
+    // plus d'effet de serre).
     const sublimated = this._hydrology(ctx, invArea);
     if (dt > 0 && sublimated > 0) {
-      G.pressure = clamp(G.pressure + sublimated, A.minPressure, A.maxPressure);
+      G.pCO2 += sublimated;
+      this._syncAtmosphere(G);
     }
 
     /* --- 8. Dérivées annuelles ------------------------------------------ */
@@ -299,17 +418,23 @@ export class ClimateSystem {
     cs.length = 0;
     for (let i = 0; i < rs.length; i++) if (Math.abs(rs[i].value) > 1e-4) cs.push(rs[i]);
 
+    // Bilan de PRESSION TOTALE : seuls comptent les termes qui ajoutent ou
+    // retirent de la matière à l'atmosphère. Le craquage CO₂ → O₂ n'y figure
+    // pas : il est neutre en pression (c'est une conversion).
     const rp = this._rowsP;
-    rp[0].value = acc.global.pressure * 365;
-    rp[1].value = (dt > 0 ? sublimated / dt : 0) * 365;
-    rp[2].value = -G.pressure * A.leak * 365;
+    const invDt = dt > 0 ? 1 / dt : 0;
+    rp[0].value = (acc.global.pressure + acc.global.co2) * 365;
+    rp[1].value = sublimated * invDt * 365;
+    rp[2].value = -(eaten - released) * invDt * 365;   // carbone piégé dans le vivant
+    rp[3].value = -G.pressure * A.leak * 365;
     const cp = state.contributions.pressure;
     cp.length = 0;
     for (let i = 0; i < rp.length; i++) if (Math.abs(rp[i].value) > 1e-4) cp.push(rp[i]);
 
+    // Bilan d'OXYGÈNE, en kPa/an : les deux sources sont des conversions du CO₂.
     const ro = this._rowsO;
-    ro[0].value = A.oxygenPerBiomass * G.biomass * 365;
-    ro[1].value = acc.global.oxygen * 365;
+    ro[0].value = released * invDt * 365;
+    ro[1].value = cracked * invDt * 365;
     const co = state.contributions.oxygen;
     co.length = 0;
     for (let i = 0; i < ro.length; i++) if (Math.abs(ro[i].value) > 1e-4) co.push(ro[i]);

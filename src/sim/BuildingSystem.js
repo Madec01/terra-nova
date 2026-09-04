@@ -15,6 +15,18 @@
  *  - la chaleur locale des bâtiments est déposée dans un tampon partagé
  *    (`acc.localHeat`) que le ClimateSystem lit pour les températures
  *    régionales : on évite ainsi de modifier directement les températures ici.
+ *
+ * DEUX CANAUX D'EFFETS PLANÉTAIRES, à ne pas confondre :
+ *  - `def.global`       = un TAUX. La valeur est multipliée par `dt` et
+ *    s'ACCUMULE dans l'état du monde (kPa de gaz ajoutés par jour, points de
+ *    stabilité par jour…). Démonter le bâtiment arrête l'apport mais ne
+ *    reprend pas ce qui a déjà été versé.
+ *  - `def.globalStatic` = un NIVEAU. La valeur est simplement SOMMÉE sur les
+ *    bâtiments ACTIFS, sans `dt`, et déposée dans `acc.staticGlobal`. L'état
+ *    du monde est recalculé de zéro à chaque tick à partir de cette somme :
+ *    démonter le bâtiment annule immédiatement son effet.
+ *    C'est ce qui rend les miroirs orbitaux réversibles — sans ce canal, huit
+ *    miroirs finissaient par verrouiller la planète à +80 °C.
  */
 import { BALANCE } from '../data/balance.js';
 import { BUILDINGS } from '../data/buildings.js';
@@ -88,6 +100,12 @@ export class BuildingSystem {
     const heat = this._heat;
     heat.fill(0);
     acc.localHeat = heat;   // canal partagé avec le ClimateSystem
+
+    /* Canal « niveau » : créé à la demande (l'accumulateur de Game ne le
+       connaît pas) puis remis à zéro à chaque tick. BuildingSystem étant le
+       premier système du pipeline, il est toujours à jour pour les suivants. */
+    const staticGlobal = acc.staticGlobal || (acc.staticGlobal = { insolation: 0 });
+    for (const key in staticGlobal) staticGlobal[key] = 0;
 
     const buildings = state.buildings;
     const mines = this._mines;
@@ -163,12 +181,25 @@ export class BuildingSystem {
         }
       }
 
-      /* Effets planétaires (co2, pression, oxygène, stabilité, insolation). */
+      /* Effets planétaires « taux » (kPa/jour de gaz, points de stabilité/jour). */
       const glob = def.global;
       if (glob) {
         for (const key in glob) {
           if (acc.global[key] === undefined) continue;
           acc.global[key] += glob[key] * eff * globalMul * sat;
+        }
+      }
+
+      /* Effets planétaires « niveau » : somme brute sur les bâtiments actifs.
+         Ni `dt` (ce n'est pas un taux) ni `sat` (un miroir orbital réfléchit
+         la lumière qu'il ait ou non du courant — seule la panne, gérée par
+         `b.active` plus haut, le retire du total). Le multiplicateur
+         technologique est appliqué par le système consommateur. */
+      const globStatic = def.globalStatic;
+      if (globStatic) {
+        for (const key in globStatic) {
+          if (staticGlobal[key] === undefined) staticGlobal[key] = 0;
+          staticGlobal[key] += globStatic[key] * (b.level || 1);
         }
       }
 
