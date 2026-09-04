@@ -36,7 +36,10 @@ export class TimeManager {
     const step = BALANCE.time.tickSeconds;
     this.accumulator += Math.min(dtReal, 0.5) * this.speed;
     let ticks = 0;
-    while (this.accumulator >= step && ticks < BALANCE.time.maxCatchUpTicks) {
+    // Tolérance : sans elle, l'accumulation de deltas flottants (ex. 100 frames
+    // de 0,025 s) reste infinitésimalement sous le seuil et perd un tick.
+    const epsilon = step * 1e-9;
+    while (this.accumulator >= step - epsilon && ticks < BALANCE.time.maxCatchUpTicks) {
       this.accumulator -= step;
       onTick(BALANCE.time.daysPerTick, this.tickIndex++);
       ticks++;

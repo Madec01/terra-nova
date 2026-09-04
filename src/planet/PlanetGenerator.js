@@ -38,7 +38,7 @@ export const PLANET_TYPES = {
     continentAmplitude: 0.62, mountainAmplitude: 0.42, detailAmplitude: 0.10,
     plates: [3, 4], plateAmplitude: 0.55, plateWidth: 0.95,
     landTarget: 0.55, seaLevelShift: 0,
-    mineralRichness: 1.0, mineralExponent: 2.1,
+    mineralRichness: 1.0, mineralExponent: 3.0,
     hotspots: 5, hotspotWidth: 0.28, geothermalTarget: 0.11,
     polarIce: 0.85, basinIce: 0.35, iceScale: 1.0,
     fertility: 1.0, radiationScale: 0.55,
@@ -50,7 +50,7 @@ export const PLANET_TYPES = {
     continentAmplitude: 0.50, mountainAmplitude: 0.28, detailAmplitude: 0.08,
     plates: [2, 3], plateAmplitude: 0.42, plateWidth: 1.15,
     landTarget: 0.58, seaLevelShift: 0,
-    mineralRichness: 0.85, mineralExponent: 2.4,
+    mineralRichness: 0.85, mineralExponent: 3.4,
     hotspots: 3, hotspotWidth: 0.22, geothermalTarget: 0.08,
     polarIce: 1.0, basinIce: 0.75, iceScale: 1.35,
     fertility: 0.7, radiationScale: 0.40,
@@ -62,7 +62,7 @@ export const PLANET_TYPES = {
     continentAmplitude: 0.58, mountainAmplitude: 0.62, detailAmplitude: 0.16,
     plates: [4, 4], plateAmplitude: 0.60, plateWidth: 0.80,
     landTarget: 0.64, seaLevelShift: 0,
-    mineralRichness: 1.25, mineralExponent: 1.8,
+    mineralRichness: 1.25, mineralExponent: 2.6,
     hotspots: 11, hotspotWidth: 0.30, geothermalTarget: 0.15,
     polarIce: 0.45, basinIce: 0.15, iceScale: 0.55,
     fertility: 0.85, radiationScale: 0.75,
@@ -74,7 +74,7 @@ export const PLANET_TYPES = {
     continentAmplitude: 0.70, mountainAmplitude: 0.34, detailAmplitude: 0.09,
     plates: [2, 3], plateAmplitude: 0.65, plateWidth: 1.05,
     landTarget: 0.42, seaLevelShift: 0,
-    mineralRichness: 0.75, mineralExponent: 2.6,
+    mineralRichness: 0.75, mineralExponent: 3.6,
     hotspots: 6, hotspotWidth: 0.26, geothermalTarget: 0.12,
     polarIce: 0.90, basinIce: 0.85, iceScale: 1.20,
     fertility: 1.15, radiationScale: 0.45,
@@ -86,7 +86,7 @@ export const PLANET_TYPES = {
     continentAmplitude: 0.48, mountainAmplitude: 0.46, detailAmplitude: 0.14,
     plates: [3, 4], plateAmplitude: 0.40, plateWidth: 1.00,
     landTarget: 0.68, seaLevelShift: 0,
-    mineralRichness: 1.1, mineralExponent: 2.0,
+    mineralRichness: 1.1, mineralExponent: 2.8,
     hotspots: 4, hotspotWidth: 0.24, geothermalTarget: 0.09,
     polarIce: 0.55, basinIce: 0.10, iceScale: 0.45,
     fertility: 0.75, radiationScale: 0.85,
@@ -239,6 +239,8 @@ function buildMinerals(regions, preset, seed, pos, n) {
   // richesse moyenne.
   const gradScale = 3.2 * Math.pow(2, regions.subdivisions - 3);
 
+  const raw = new Float64Array(n);
+  let peak = 0;
   for (let i = 0; i < n; i++) {
     // Gradient d'élévation entre voisins = proxy de fracture tectonique :
     // c'est là que les filons remontent.
@@ -250,9 +252,16 @@ function buildMinerals(regions, preset, seed, pos, n) {
     }
     const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
     const nz = noise.fbm(x, y, z, opts) * 0.5 + 0.5;
-    const v = clamp01(nz * 0.62 + Math.max(0, elev[i]) * 0.22 + clamp01(grad * gradScale) * 0.30 - 0.12);
+    const v = Math.max(0, nz * 0.62 + Math.max(0, elev[i]) * 0.22 + clamp01(grad * gradScale) * 0.30 - 0.12);
+    raw[i] = v;
+    if (v > peak) peak = v;
+  }
+  // On ramène le meilleur filon à 1 avant la courbe puissance : sans ça, aucune
+  // seed ne produirait jamais un gisement vraiment exceptionnel.
+  const inv = peak > 1e-6 ? 1 / peak : 1;
+  for (let i = 0; i < n; i++) {
     // Courbe puissance : beaucoup de régions pauvres, quelques vrais gisements.
-    out[i] = clamp01(Math.pow(v, preset.mineralExponent) * preset.mineralRichness);
+    out[i] = clamp01(Math.pow(raw[i] * inv, preset.mineralExponent) * preset.mineralRichness);
   }
 }
 
