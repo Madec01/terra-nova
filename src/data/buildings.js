@@ -8,9 +8,40 @@
  *  produces  : produit chaque jour (modulé par outputScale et la satisfaction énergétique)
  *  requires  : conditions de placement
  *  local     : effets sur la région (par jour)
- *  global    : effets sur les paramètres planétaires (par jour)
- *  outputScale(region, state) : multiplicateur contextuel, fonction PURE
+ *  global    : effets planétaires exprimés comme un TAUX (par jour, × dt, cumulatif)
+ *  globalStatic : effets planétaires exprimés comme un NIVEAU (sommés sur les
+ *                 bâtiments actifs, sans dt — démonter annule immédiatement)
+ *  outputScale(region, state) : multiplicateur contextuel, fonction PURE.
+ *                 Il module AUSSI les effets `global` (mais pas `globalStatic`).
+ *
+ * ---------------------------------------------------------------------------
+ *  SÉMANTIQUE DES EFFETS ATMOSPHÉRIQUES (modèle en pressions partielles)
+ * ---------------------------------------------------------------------------
+ *  L'atmosphère est décrite par trois réservoirs en kPa — pCO2, pO2, pInert —
+ *  dont `pressure`, `co2` (%) et `oxygen` (%) sont DÉRIVÉS
+ *  (cf. src/sim/ClimateSystem.js). Les trois canaux disponibles sont donc :
+ *
+ *   global.co2      → kPa de CO₂ AJOUTÉS par jour.
+ *                     Dégazage volcanique, halocarbures, fonte des calottes.
+ *                     Réchauffe (effet de serre) et épaissit l'atmosphère.
+ *
+ *   global.pressure → kPa de gaz INERTES (azote + argon) ajoutés par jour.
+ *                     Dégazage du régolithe. Épaissit l'atmosphère SANS
+ *                     toucher au rapport CO₂/O₂ : c'est le levier « pression »
+ *                     propre, celui qui rend l'eau liquide stable.
+ *
+ *   global.oxygen   → kPa de CO₂ CONVERTIS en O₂ par jour (craquage).
+ *                     Ce n'est PAS une création de matière : ce qui est ajouté
+ *                     à pO2 est retiré de pCO2, et la conversion s'arrête s'il
+ *                     n'y a plus de CO₂. Rendre l'air respirable assèche donc
+ *                     l'effet de serre : c'est la tension de fin de partie.
+ *
+ *  Corollaire d'équilibrage : un bâtiment ne doit JAMAIS cumuler `oxygen` et
+ *  un `co2` négatif — le craquage débite déjà le CO₂ tout seul.
  */
+
+import { BALANCE } from './balance.js';
+import { smoothstep } from '../utils/math.js';
 
 export const BUILDINGS = {
   /* ------------------------------------------------------------------ */
@@ -108,16 +139,22 @@ export const BUILDINGS = {
   },
 
   ice_extractor: {
-    id: 'ice_extractor', name: 'Extracteur de glace', category: 'eau', icon: '❄', tier: 1,
-    desc: 'Sublime la glace du sous-sol. Libère de l’eau et un peu de vapeur atmosphérique.',
+    id: 'ice_extractor', name: 'Station hydrique', category: 'eau', icon: '❄', tier: 1,
+    desc: 'Sublime la glace du sous-sol, puis pompe lacs et nappes une fois la planète dégelée.',
     cost: { materials: 60 },
     upkeep: { energy: 2.6 },
-    produces: { water: 2.2 },
-    requires: { ice: 0.2 },
+    produces: { water: 2.6 },
+    requires: { ice: 0.12 },
     local: { moisture: 0.0016, ice: -0.00035 },
-    global: { pressure: 0.00045 },
+    // La glace sublimée rend surtout de la vapeur et un peu de CO₂ piégé.
+    global: { pressure: 0.00008, co2: 0.00003 },
     maxPerRegion: 1,
-    outputScale: (r) => 0.3 + r.ice * 1.8,
+    /* Le rendement suit la glace TANT QU'IL Y EN A, puis bascule sur l'eau
+       libre et l'humidité. Sans cette bascule, la production d'eau s'effondrait
+       exactement au moment où la planète dégelait : les colonies mouraient de
+       soif sur une planète couverte de lacs. */
+    outputScale: (r) => 0.25 + r.ice * 1.4
+      + Math.min(1, r.water / BALANCE.water.basinDepth + r.moisture) * 1.6,
   },
 
   /* ------------------------------------------------------------------ */
@@ -131,8 +168,16 @@ export const BUILDINGS = {
     produces: {},
     requires: { tech: 'greenhouse_gases' },
     local: { pollution: 0.0055 },
-    global: { co2: 0.0075, pressure: 0.0055, stability: -0.0016 },
+    // Levier de réchauffement le plus rapide : du CO₂ pur, peu d'inertes.
+    // 12 usines ≈ +0,96 kPa de CO₂ par an, soit ~+10 °C d'effet de serre en
+    // une douzaine d'années.
+    global: { co2: 0.00016, pressure: 0.00006, stability: -0.0016 },
     maxPerRegion: 1,
+    /* Les halocarbures se photodissocient : plus le CO₂ est déjà abondant,
+       moins l'usine en ajoute. C'est le frein qui empêche l'emballement de
+       l'effet de serre — et ce qui rend la surchauffe corrigeable. */
+    outputScale: (r, s) => 1 - smoothstep(BALANCE.atmosphere.co2Soft,
+      BALANCE.atmosphere.co2Ceiling, s.globals.pCO2 ?? 0),
   },
 
   atmo_processor: {
@@ -142,9 +187,16 @@ export const BUILDINGS = {
     upkeep: { energy: 8.0 },
     produces: {},
     requires: { tech: 'atmospheric_engineering' },
-    global: { pressure: 0.0022, co2: 0.0006 },
+    // Levier de PRESSION : des inertes, presque pas de CO₂.
+    // 14 processeurs ≈ +4 kPa/an → il faut une quinzaine d'années pour
+    // amener l'atmosphère de 5 à ~70 kPa : c'est le tempo de la partie.
+    global: { pressure: 0.00050, co2: 0.00003 },
     maxPerRegion: 1,
-    outputScale: (r) => 0.7 + r.geothermal * 0.9,
+    /* Le rendement s'effondre quand l'atmosphère devient épaisse : le régolithe
+       ne rend plus ses gaz contre la pression ambiante. C'est ce qui empêche
+       la pression de saturer même si le joueur oublie ses processeurs. */
+    outputScale: (r, s) => (0.7 + r.geothermal * 0.9)
+      * (1 - smoothstep(BALANCE.atmosphere.degassingSoft, BALANCE.atmosphere.degassingCeiling, s.globals.pressure)),
   },
 
   o2_generator: {
@@ -154,8 +206,16 @@ export const BUILDINGS = {
     upkeep: { energy: 12 },
     produces: {},
     requires: { tech: 'carbon_capture' },
-    global: { oxygen: 0.0100, co2: -0.0045, stability: 0.0004 },
+    // `oxygen` est une CONVERSION CO₂ → O₂ : inutile (et faux) d'y ajouter un
+    // `co2` négatif, le craquage débite déjà le réservoir de CO₂.
+    // 12 générateurs ≈ +1,5 kPa d'O₂ par an, prélevés sur le CO₂.
+    global: { oxygen: 0.00025, stability: 0.0004 },
     maxPerRegion: 1,
+    /* Le craquage travaille contre la contre-pression d'oxygène déjà présente :
+       le rendement s'annule vers `o2Ceiling`. Sans ce frein, les générateurs
+       vidaient tout le CO₂ et regelaient la planète. */
+    outputScale: (r, s) => 1 - smoothstep(BALANCE.atmosphere.o2Soft,
+      BALANCE.atmosphere.o2Ceiling, s.globals.pO2 ?? 0),
   },
 
   polar_melter: {
@@ -166,7 +226,8 @@ export const BUILDINGS = {
     produces: { water: 1.4 },
     requires: { tech: 'polar_engineering', ice: 0.35 },
     local: { ice: -0.0042, moisture: 0.0034, heat: 0.9 },
-    global: { pressure: 0.0022, co2: 0.0012 },
+    // La calotte est surtout de la glace carbonique : elle rend du CO₂.
+    global: { pressure: 0.00008, co2: 0.00008 },
     maxPerRegion: 1,
   },
 
@@ -177,7 +238,10 @@ export const BUILDINGS = {
     upkeep: { energy: 3.0 },
     produces: {},
     requires: { tech: 'orbital_infrastructure' },
-    global: { insolation: 0.00001 },   // cumulatif : 8 miroirs ≈ +0,03 d'ensoleillement par an
+    /* NIVEAU, pas taux : l'ensoleillement vaut 1 + somme des miroirs ACTIFS.
+       8 miroirs = +0,40 d'ensoleillement ≈ +25 °C ; démonter un miroir retire
+       ses ~3 °C dès le tick suivant. C'est le thermostat de la partie. */
+    globalStatic: { insolation: 0.05 },
     maxPerRegion: 1,
     maxTotal: 8,
     orbital: true,
@@ -202,11 +266,12 @@ export const BUILDINGS = {
     id: 'biodome', name: 'Bio-dôme', category: 'biosphere', icon: '❋', tier: 2,
     desc: 'Cultive des organismes pionniers et ensemence la région. Nécessite eau et douceur.',
     cost: { materials: 150, science: 55 },
-    upkeep: { energy: 4.0, water: 1.2 },
+    upkeep: { energy: 4.0, water: 0.6 },
     produces: { biomass: 0.35 },
     requires: { tech: 'pioneer_organisms', minTemp: -25 },
     local: { vegetation: 0.0042, moisture: 0.0008 },
-    global: { oxygen: 0.0006 },
+    // Craquage d'appoint : symbolique à côté de la photosynthèse planétaire.
+    global: { oxygen: 0.00006 },
     maxPerRegion: 1,
   },
 
@@ -214,7 +279,7 @@ export const BUILDINGS = {
     id: 'seeder', name: 'Tour d’ensemencement', category: 'biosphere', icon: '⁂', tier: 3,
     desc: 'Disperse des spores sur toute la zone. Accélère fortement la propagation végétale.',
     cost: { materials: 260, science: 120 },
-    upkeep: { energy: 5.5, water: 1.8 },
+    upkeep: { energy: 5.5, water: 0.9 },
     produces: { biomass: 0.5 },
     requires: { tech: 'forestation' },
     local: { vegetation: 0.0030 },

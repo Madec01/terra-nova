@@ -245,7 +245,12 @@ export class ClimateSystem {
       // CO₂ → O₂ elle aussi limitée par le CO₂ disponible. Le carbone étant
       // séquestré dans la biomasse, l'O₂ rendu est INFÉRIEUR au CO₂ consommé
       // (oxygenPerBiomass < co2PerBiomass) : la biosphère refroidit la planète.
-      const bio = clamp(G.biomass, 0, BALANCE.biosphere.globalScale);
+      // Le rendement NET s'annule quand l'oxygène devient abondant : une
+      // biosphère mûre respire et oxyde autant qu'elle photosynthétise. Sans
+      // ce frein, le couple « usine à gaz → plante » était une pompe infinie
+      // qui poussait la pression jusqu'à l'écrêtage.
+      const bio = clamp(G.biomass, 0, BALANCE.biosphere.globalScale)
+        * (1 - smoothstep(A.o2Soft, A.o2Ceiling, G.pO2));
       if (bio > 0) {
         eaten = Math.min(G.pCO2, A.co2PerBiomass * bio * dt);
         released = Math.min(eaten, A.oxygenPerBiomass * bio * dt);

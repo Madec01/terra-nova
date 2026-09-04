@@ -30,7 +30,7 @@ function boot() {
   const uiRoot = document.getElementById('ui');
 
   const game = new Game();
-  const audio = new AudioManager({ basePath: './public/audio/' });
+  const audio = new AudioManager({ basePath: './audio/' });
   game.audio = audio;
   // Le menu d'accueil propose les types de monde sans importer le générateur
   // (l'interface n'a pas le droit de dépendre de la couche planète).

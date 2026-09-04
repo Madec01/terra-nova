@@ -8,25 +8,64 @@
  */
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
+
+/**
+ * Playwright attend une build de Chromium précise, qui ne correspond pas
+ * forcément à celle installée sur la machine. On cherche donc un binaire
+ * utilisable plutôt que d'exiger `npx playwright install`.
+ */
+function findChromium() {
+  const candidates = [
+    process.env.CHROMIUM_PATH,
+    '/opt/pw-browsers/chromium',
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
+  ].filter(Boolean);
+  for (const c of candidates) if (existsSync(c)) return c;
+  return undefined;   // on laisse Playwright tenter sa propre résolution
+}
 
 const SHOT_DIR = process.env.SHOT_DIR || '/tmp/terranova-shots';
 const wantShots = process.argv.includes('--shot');
-const PORT = 5199;
+// Port tiré au hasard : un serveur orphelin d'une exécution précédente ou
+// deux exécutions concurrentes ne se marchent plus dessus.
+const PORT = 5200 + Math.floor(Math.random() * 400);
 
-function startVite() {
+/**
+ * On teste le BUILD DE PRODUCTION, pas le serveur de développement : le
+ * rechargement à chaud de Vite réinitialise la page dès qu'un fichier source
+ * change, ce qui faisait échouer le scénario quand quelqu'un éditait le code
+ * pendant l'exécution. En prime, cela valide le build lui-même.
+ */
+function buildOnce() {
   return new Promise((resolve, reject) => {
-    const p = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
+    const p = spawn('npx', ['vite', 'build', '--logLevel', 'warn'], {
       cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
-    const to = setTimeout(() => reject(new Error('Vite n’a pas démarré:\n' + out)), 30000);
+    p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { out += d; });
+    p.on('exit', (c) => (c === 0 ? resolve(out) : reject(new Error('Échec du build :\n' + out))));
+  });
+}
+
+function startServer() {
+  return new Promise((resolve, reject) => {
+    const p = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
+      cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], detached: true,
+    });
+    // Le serveur est tué quoi qu'il arrive : sortie normale, exception ou Ctrl-C.
+    const kill = () => { try { process.kill(-p.pid, 'SIGTERM'); } catch {} };
+    process.on('exit', kill);
+    process.on('SIGINT', () => { kill(); process.exit(130); });
+    let out = '';
+    const to = setTimeout(() => reject(new Error('Le serveur n’a pas démarré :\n' + out)), 30000);
     p.stdout.on('data', (d) => {
       out += d;
       if (/Local:.*http/.test(out)) { clearTimeout(to); resolve(p); }
     });
     p.stderr.on('data', (d) => { out += d; });
-    p.on('exit', (c) => { clearTimeout(to); reject(new Error(`Vite s'est arrêté (${c}):\n${out}`)); });
+    p.on('exit', (c) => { clearTimeout(to); reject(new Error(`Le serveur s'est arrêté (${c}) :\n${out}`)); });
   });
 }
 
@@ -34,16 +73,26 @@ const errors = [];
 const warnings = [];
 
 async function run() {
-  const vite = await startVite();
+  process.stdout.write('Build de production … ');
+  await buildOnce();
+  console.log('ok');
+  const vite = await startServer();
+  const exe = findChromium();
+  if (exe) console.log(`Chromium : ${exe}`);
   const browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH || undefined,
+    executablePath: exe,
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--disable-dev-shm-usage'],
   });
   const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
 
   page.on('console', (msg) => {
     const t = msg.type();
-    const text = msg.text();
+    // Le texte d'un échec de chargement ne contient pas l'URL : on la lit dans
+    // la localisation du message, sinon le diagnostic est impossible.
+    const where = msg.location?.().url || '';
+    const text = msg.text() + (where ? ` [${where}]` : '');
+    // Les 404 sur les sons sont attendus : le jeu fonctionne sans fichier audio.
+    if (t === 'error' && /audio\//.test(text)) return;
     if (t === 'error') errors.push(text);
     else if (t === 'warning' && !/deprecat|SwiftShader|GPU stall|WebGL/i.test(text)) warnings.push(text);
   });
@@ -194,7 +243,7 @@ async function run() {
   await shot('07-final');
 
   await browser.close();
-  if (!process.argv.includes('--keep')) vite.kill('SIGTERM');
+  if (!process.argv.includes('--keep')) { try { process.kill(-vite.pid, 'SIGTERM'); } catch {} }
 
   console.log('\n─────────────────────────────────────────');
   if (warnings.length) {

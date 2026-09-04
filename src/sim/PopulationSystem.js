@@ -39,9 +39,11 @@ export class PopulationSystem {
     let total = 0;
     let famine = false;
 
-    // Manque-t-il des vivres ? ResourceSystem a déjà écrêté à zéro ce tick.
-    const noWater = state.resources.water <= 0;
-    const noFood = state.resources.biomass <= 0;
+    // Les stocks planétaires sont-ils à sec ? ResourceSystem a déjà écrêté à
+    // zéro ce tick. ATTENTION : un stock vide ne suffit PAS à affamer une
+    // colonie — encore faut-il qu'elle en dépende (voir plus bas).
+    const dryStock = state.resources.water <= 0;
+    const emptyStock = state.resources.biomass <= 0;
 
     for (let k = 0; k < buildings.length; k++) {
       const b = buildings[k];
@@ -53,9 +55,23 @@ export class PopulationSystem {
       let pop = Math.max(0, b.population);
       const hab = clamp01(regions.habitability[b.region]);
 
+      /* --- Autosuffisance de CETTE colonie -------------------------------
+         Une colonie posée sur une région verte et humide se nourrit et
+         s'abreuve sur place ; elle ne dépend des stocks planétaires que pour
+         le RELIQUAT. C'est décisif : auparavant, un stock d'eau planétaire à
+         sec (asséché par les bio-dômes et les ensemenceurs) affamait TOUTES
+         les colonies, même celles installées au bord d'un lac. */
+      const veg = clamp01(regions.vegetation[b.region]);
+      const localWater = clamp01(regions.water[b.region] / BALANCE.water.basinDepth
+        + regions.moisture[b.region]);
+      const waterRelief = clamp01(localWater * C.localWaterRelief);
+      const foodRelief = clamp01(veg * (C.farmPer1k.biomass / C.upkeepPer1k.biomass));
+      const thirsty = dryStock && waterRelief < 1;
+      const hungry = emptyStock && foodRelief < 1;
+
       if (b.active !== false && dt > 0) {
         const capacity = Math.max(1, C.capacityPerColony * hab);
-        if (noWater || noFood) {
+        if (thirsty || hungry) {
           // Famine : la population décroît tant que les vivres manquent.
           pop -= pop * C.starvationRate * dt;
           famine = true;
@@ -75,16 +91,38 @@ export class PopulationSystem {
       regions.population[b.region] += pop;
       total += pop;
 
-      /* --- Flux de la colonie (par jour) -------------------------------- */
+      /* --- Flux de la colonie (par jour) --------------------------------
+         AUTOSUFFISANCE LOCALE. Une colonie exploite d'abord sa région :
+          - elle cultive ses vivres au prorata de la végétation locale
+            (`BALANCE.colony.farmPer1k`) ;
+          - elle puise son eau dans les lacs et l'humidité du sol
+            (`BALANCE.colony.localWaterRelief`).
+         Sans cela, chaque millier d'habitants supplémentaire ponctionnait les
+         stocks planétaires sans rien y remettre : la famine était structurelle
+         et la population finissait toujours par s'éteindre. */
       const k1 = pop / 1000;
       const up = C.upkeepPer1k, out = C.outputPer1k;
+
       for (const key in up) {
-        acc.consume[key] += up[key] * k1;
-        ResourceSystem.defer(acc, 'consume', key, up[key] * k1);
+        let need = up[key] * k1;
+        if (key === 'water') need *= (1 - waterRelief);
+        if (need <= 0) continue;
+        acc.consume[key] += need;
+        ResourceSystem.defer(acc, 'consume', key, need);
       }
       for (const key in out) {
         acc.produce[key] += out[key] * k1;
         ResourceSystem.defer(acc, 'produce', key, out[key] * k1);
+      }
+      // Agriculture locale : seule la végétation de la région la porte.
+      const farm = C.farmPer1k;
+      if (farm && veg > 0) {
+        for (const key in farm) {
+          const grown = farm[key] * k1 * veg;
+          if (grown <= 0) continue;
+          acc.produce[key] += grown;
+          ResourceSystem.defer(acc, 'produce', key, grown);
+        }
       }
     }
 

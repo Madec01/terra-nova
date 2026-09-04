@@ -122,18 +122,50 @@ export const BALANCE = {
   /* --------------------------------------------------------------------- */
   /*  ATMOSPHÈRE                                                           */
   /* --------------------------------------------------------------------- */
+  /*  L'atmosphère est modélisée en PRESSIONS PARTIELLES (kPa) : pCO2, pO2 et
+   *  pInert. `pressure`, `co2` (%) et `oxygen` (%) en sont dérivés — voir
+   *  src/sim/ClimateSystem.js. Toutes les valeurs ci-dessous sont donc en
+   *  kPa/jour, jamais en points de pourcentage.                             */
   atmosphere: {
-    /** Fuite atmosphérique : fraction de pression perdue par jour. */
+    /** Fuite atmosphérique : fraction perdue par jour, sur les TROIS réservoirs. */
     leak: 0.000045,
-    /** Sublimation : la glace qui fond libère du CO₂ et de la vapeur. */
-    sublimationPressure: 0.0016,   // kPa/jour à fonte maximale
-    /** L'oxygène produit par la biosphère, par point d'indice de biomasse et par jour. */
-    oxygenPerBiomass: 0.00042,
-    /** CO₂ consommé par la photosynthèse. */
-    co2PerBiomass: 0.00016,
-    /** Plancher/plafond de sécurité. */
+    /** Sublimation des calottes (glace carbonique) → réservoir de CO₂. */
+    sublimationPressure: 0.0010,   // kPa/jour à fonte maximale
+    /**
+     * PHOTOSYNTHÈSE — c'est une CONVERSION CO₂ → O₂, en kPa/jour et par point
+     * d'indice de biomasse (0..100), limitée par le CO₂ réellement disponible.
+     * `oxygenPerBiomass` est volontairement INFÉRIEUR à `co2PerBiomass` : le
+     * carbone part dans la biomasse (séquestration), il n'est pas rendu à
+     * l'atmosphère. Conséquence de design : une biosphère mûre refroidit la
+     * planète en mangeant son effet de serre — le joueur doit anticiper.
+     */
+    co2PerBiomass: 0.000055,
+    oxygenPerBiomass: 0.000040,
+    /** Plancher/plafond de sécurité sur la pression TOTALE (répartis au prorata). */
     minPressure: 0.2,
     maxPressure: 140,
+    /**
+     * Saturation du dégazage du régolithe : rendement plein tant que la
+     * pression reste sous `degassingSoft`, nul au-delà de `degassingCeiling`.
+     * C'est ce qui remplace l'ancien écrêtage brutal à 140 kPa : la pression
+     * converge naturellement vers une valeur jouable au lieu de saturer.
+     */
+    degassingSoft: 40,
+    degassingCeiling: 64,
+    /**
+     * Mêmes freins pour les deux autres réservoirs, exprimés sur la PRESSION
+     * PARTIELLE concernée (kPa) :
+     *  - les halocarbures se photodissocient d'autant plus vite que le CO₂ est
+     *    abondant → l'effet de serre plafonne au lieu de s'emballer ;
+     *  - le craquage du CO₂ travaille contre la contre-pression d'O₂ → la
+     *    teneur en oxygène converge vers ~18–22 % au lieu de filer à 100 %.
+     * Ces trois saturations donnent à l'atmosphère un ATTRACTEUR jouable
+     * (≈ 70–85 kPa, ~20 % de CO₂, ~18 % d'O₂) sans le moindre écrêtage brutal.
+     */
+    co2Soft: 10,
+    co2Ceiling: 19,
+    o2Soft: 12,
+    o2Ceiling: 22,
   },
 
   /* --------------------------------------------------------------------- */
@@ -166,11 +198,11 @@ export const BALANCE = {
     minPressure: 8,
     minMoisture: 0.12,
     /** Vitesse de croissance de la végétation par jour dans une région idéale. */
-    growthRate: 0.011,
+    growthRate: 0.0060,
     /** Vitesse de dépérissement en conditions hostiles. */
     decayRate: 0.014,
     /** Propagation vers les régions voisines (fraction par jour). */
-    spreadRate: 0.0055,
+    spreadRate: 0.0030,
     /** Seuil de végétation à partir duquel une région essaime. */
     spreadThreshold: 0.25,
     /** Conversion végétation régionale → indice de biomasse global (0..100). */
@@ -225,15 +257,36 @@ export const BALANCE = {
   /* --------------------------------------------------------------------- */
   colony: {
     /** Habitabilité requise pour fonder une colonie (0..1). */
-    minHabitability: 0.45,
+    minHabitability: 0.42,
     /** Population initiale et croissance. */
     seedPopulation: 400,
-    growthRate: 0.0040,          // par jour, modulé par l'habitabilité
+    growthRate: 0.0045,          // par jour, modulé par l'habitabilité
     capacityPerColony: 15000,
-    /** Consommations par 1000 habitants et par jour. */
+    /** Consommations par 1000 habitants et par jour (besoin BRUT). */
     upkeepPer1k: { energy: 1.6, water: 0.9, biomass: 0.55 },
     /** Productions par 1000 habitants et par jour. */
     outputPer1k: { science: 0.75, materials: 0.5 },
+    /**
+     * AUTOSUFFISANCE LOCALE — la cause de l'effondrement démographique était
+     * là : une colonie était nourrie et abreuvée exclusivement par les stocks
+     * planétaires, dont la production (bio-dômes, extracteurs) ne suivait pas
+     * la croissance de la population. Résultat : famine permanente dès
+     * ~20 000 habitants, puis extinction.
+     *
+     * Désormais une colonie exploite d'abord SA région :
+     *  - `farmPer1k` : biomasse cultivée sur place par millier d'habitants et
+     *    par jour, multipliée par la végétation locale. Sur une région verte,
+     *    la colonie est excédentaire (1,25 × 0,7 > 0,55) ; sur un désert elle
+     *    reste entièrement à la charge des stocks. La colonisation devient donc
+     *    une récompense de la biosphère, pas une course parallèle.
+     *  - `localWaterRelief` : fraction du besoin en eau couverte par l'eau
+     *    libre et l'humidité de la région (lacs, nappes).
+     */
+    farmPer1k: { biomass: 1.25 },
+    /* À 1, une colonie posée sur une région réellement humide (eau libre +
+       humidité ≥ 1) est TOTALEMENT indépendante des stocks planétaires. C'est
+       volontaire : le bon emplacement d'une colonie, c'est le bord d'un lac. */
+    localWaterRelief: 1.0,
     /** Une famine fait chuter la population de ce taux par jour. */
     starvationRate: 0.008,
   },
@@ -250,10 +303,17 @@ export const BALANCE = {
      */
     idealTemp: 15,
     tempTolerance: 24,
-    minPressure: 34,
-    idealPressure: 90,
-    minOxygen: 12,
-    idealOxygen: 20,
+    minPressure: 30,
+    idealPressure: 80,
+    /**
+     * Les habitats sont pressurisés : l'oxygène ATMOSPHÉRIQUE n'a pas besoin
+     * d'être respirable pour qu'une colonie tienne, il doit seulement exister
+     * en quantité exploitable. Avec l'ancien minOxygen = 12 %, aucune colonie
+     * n'était constructible avant la toute fin de partie — la population
+     * n'avait alors plus le temps d'atteindre l'objectif de victoire.
+     */
+    minOxygen: 5,
+    idealOxygen: 18,
     weights: { temperature: 0.3, pressure: 0.22, oxygen: 0.22, water: 0.13, stability: 0.13 },
   },
 
@@ -279,8 +339,12 @@ export const BALANCE = {
   /*  RECHERCHE                                                            */
   /* --------------------------------------------------------------------- */
   research: {
-    /** Multiplicateur global du coût des technologies. */
-    costScale: 1,
+    /**
+     * Multiplicateur global du coût des technologies. À 1, l'arbre entier
+     * tombait en cinq ans : la partie n'avait plus aucune progression et le
+     * joueur disposait de tous les leviers avant même d'avoir un climat.
+     */
+    costScale: 12,
     /** Science produite passivement par la station de commandement. */
     baseScience: 0.35,
   },
@@ -306,7 +370,10 @@ export const BALANCE = {
     temperature: { min: 0, max: 30 },
     pressure: { min: 60 },
     oxygen: { min: 16 },
-    waterCoverage: { min: 0.25 },
+    /* 0,18 et non 0,25 : la géométrie des bassins (BALANCE.water.basinDepth et
+       la fraction de cellules sous le niveau de mer) plafonne la couverture
+       atteignable autour de 22 %. L'ancienne cible était inatteignable. */
+    waterCoverage: { min: 0.18 },
     biomass: { min: 45 },
     population: { min: 15000 },
     stability: { min: 75 },

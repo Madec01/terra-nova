@@ -33,29 +33,50 @@ test('planète froide et vierge : pas de dérive absurde sur 3650 jours', () => 
 /*  2. Les usines à effet de serre réchauffent et déstabilisent          */
 /* ===================================================================== */
 
+/**
+ * ADAPTÉ AU MODÈLE EN PRESSIONS PARTIELLES. Deux changements de fond :
+ *  1. `co2` est désormais un POURCENTAGE dérivé : il peut parfaitement baisser
+ *     pendant qu'on injecte du CO₂, puisque la pression totale monte aussi.
+ *     La grandeur à surveiller est la pression partielle `pCO2` (kPa).
+ *  2. l'ancienne version comparait la planète à son état INITIAL. Or l'état
+ *     initial de BALANCE (−52 °C) est plus chaud que l'équilibre radiatif de la
+ *     planète-test : sans rien faire elle refroidit déjà. On compare donc
+ *     maintenant à un TÉMOIN identique sans usines — ce qui teste l'effet des
+ *     usines et non le tempo d'équilibrage.
+ */
 test('usines à gaz à effet de serre : CO₂ ↑, température ↑, stabilité ↓', () => {
-  const h = createSimHarness({ seed: 12 });
-  // De l'énergie en abondance pour que les usines tournent à plein régime.
-  h.addBuilding('fusion', 1, 1);
-  h.addBuilding('fusion', 4, 1);
-  h.addBuilding('ghg_factory', 2, 1);
-  h.addBuilding('ghg_factory', 5, 1);
-  h.addBuilding('ghg_factory', 8, 1);
-  h.addBuilding('ghg_factory', 11, 1);
-  h.state.resources.energy = 400;
-  h.state.resources.water = 600;
+  const build = (withFactories) => {
+    const h = createSimHarness({ seed: 12 });
+    // De l'énergie en abondance pour que les usines tournent à plein régime.
+    h.addBuilding('fusion', 1, 1);
+    h.addBuilding('fusion', 4, 1);
+    if (withFactories) {
+      h.addBuilding('ghg_factory', 2, 1);
+      h.addBuilding('ghg_factory', 5, 1);
+      h.addBuilding('ghg_factory', 8, 1);
+      h.addBuilding('ghg_factory', 11, 1);
+    }
+    h.state.resources.energy = 400;
+    h.state.resources.water = 600;
+    return h;
+  };
 
+  const h = build(true);
+  const witness = build(false);
   const before = { ...h.state.globals };
   h.run(3650);
-  const g = h.state.globals;
+  witness.run(3650);
+  const g = h.state.globals, w = witness.state.globals;
 
   assert.ok(allFinite(g));
-  assert.ok(g.co2 > before.co2, `le CO₂ doit monter (${before.co2} → ${g.co2})`);
-  assert.ok(g.pressure > before.pressure, 'la pression doit monter');
-  assert.ok(g.temperature > before.temperature + 5,
-    `la planète doit se réchauffer (${before.temperature} → ${g.temperature})`);
-  assert.ok(g.stability < before.stability,
-    `la stabilité doit chuter (${before.stability} → ${g.stability})`);
+  assert.ok(g.pCO2 > before.pCO2, `le CO₂ doit monter (${before.pCO2} → ${g.pCO2} kPa)`);
+  assert.ok(g.pCO2 > w.pCO2 + 1, `plus de CO₂ qu'un témoin sans usines (${w.pCO2} → ${g.pCO2} kPa)`);
+  assert.ok(g.pressure > w.pressure, 'la pression doit monter plus vite que le témoin');
+  assert.ok(g.co2 + g.oxygen <= 100.01, 'la composition doit rester cohérente');
+  assert.ok(g.temperature > w.temperature + 1,
+    `la planète doit se réchauffer (témoin ${w.temperature} → ${g.temperature})`);
+  assert.ok(g.stability < w.stability,
+    `la stabilité doit chuter (témoin ${w.stability} → ${g.stability})`);
 
   // Le joueur doit pouvoir comprendre pourquoi : les contributions existent.
   const labels = h.state.contributions.temperature.map((r) => r.label);
@@ -126,8 +147,15 @@ test('pénurie d’énergie : la satisfaction chute et la production suit', () =
 /*  5. Biosphère : pression minimale, croissance, propagation            */
 /* ===================================================================== */
 
-function greenhouseHarness(pressure) {
-  return createSimHarness({
+/**
+ * ADAPTÉ AU MODÈLE « MIROIRS = NIVEAU » : `globals.insolation` n'est plus une
+ * valeur que l'on pose, c'est un DÉRIVÉ recalculé chaque tick à partir des
+ * miroirs orbitaux actifs. On chauffe donc la serre en posant 5 miroirs
+ * (5 × BALANCE des miroirs = +0,25 d'ensoleillement), ce qui reproduit
+ * exactement l'ancien 1,26 forcé à la main.
+ */
+function greenhouseHarness(pressure, mirrors = 5) {
+  const h = createSimHarness({
     seed: 15, w: 8, h: 1,
     init: (R, state) => {
       for (let i = 0; i < R.count; i++) {
@@ -145,9 +173,11 @@ function greenhouseHarness(pressure) {
       state.globals.temperature = 16;
       state.globals.pressure = pressure;
       state.globals.co2 = 60;
-      state.globals.insolation = 1.26;   // maintient l'équilibre autour de 16 °C
     },
   });
+  for (let k = 0; k < mirrors; k++) h.addBuilding('orbital_mirror', k % h.regions.count);
+  h.state.resources.energy = 4000;
+  return h;
 }
 
 test('la végétation ne pousse pas sous BALANCE.biosphere.minPressure', () => {
@@ -169,8 +199,10 @@ test('la végétation pousse et se propage aux voisins en bonnes conditions', ()
   assert.ok(h.regions.vegetation[1] > 0.01, 'le voisin de droite doit être ensemencé');
   assert.ok(h.regions.vegetation[7] > 0.01, 'le voisin de gauche aussi');
   assert.ok(h.state.globals.biomass > 5, 'la biomasse globale doit progresser');
-  assert.ok(h.state.globals.oxygen > BALANCE.start.globals.oxygen,
-    'la photosynthèse doit produire de l’oxygène');
+  // La photosynthèse convertit du CO₂ en O₂ : c'est `pO2` (kPa) qui monte.
+  assert.ok(h.state.globals.pO2 > 0.5,
+    `la photosynthèse doit produire de l’oxygène (${h.state.globals.pO2} kPa)`);
+  assert.ok(h.state.globals.co2 + h.state.globals.oxygen <= 100.01);
 });
 
 /* ===================================================================== */

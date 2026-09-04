@@ -161,8 +161,10 @@ export class EventSystem {
     pushLog(state, text, kind, result.icon || '◈');
     if (result.regionId != null) this.game?.markRegionDirty?.(result.regionId);
 
+    /* Un seul événement de notification : l'interface construit déjà une carte
+       riche (titre, texte, lien vers la région) depuis `event:triggered`.
+       Émettre aussi `notify` affichait chaque événement en double. */
     bus.emit('event:triggered', { event: { id: picked.id, ...result } });
-    bus.emit('notify', { text, kind, icon: result.icon || '◈' });
   }
 }
 
