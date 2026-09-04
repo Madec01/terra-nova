@@ -500,6 +500,22 @@ export class SceneManager {
 
   /* ==================================================================== */
 
+  /**
+   * Distance minimale à laquelle la planète tient ENTIÈREMENT dans le cadre.
+   *
+   * Le champ de vision vertical est fixe : sur un écran en portrait (un
+   * téléphone), l'ouverture horizontale devient bien plus étroite que la
+   * verticale et la planète déborde des deux côtés. On calcule donc la
+   * contrainte réelle à partir du plus petit des deux demi-angles.
+   */
+  _fitDistance(margin = 1.12) {
+    const halfV = (this.camera.fov * Math.PI / 180) / 2;
+    const halfH = Math.atan(Math.tan(halfV) * this.camera.aspect);
+    const half = Math.min(halfV, halfH);
+    const radius = BALANCE.planet.radius * (1 + BALANCE.planet.reliefScale);
+    return (radius / Math.max(0.05, Math.sin(half))) * margin;
+  }
+
   resize() {
     if (this._disposed) return;
     const w = this.canvas.clientWidth || this.canvas.width || 1;
@@ -510,6 +526,21 @@ export class SceneManager {
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
     this.sky.setPixelRatio(this.renderer.getPixelRatio());
+
+    // Recadrage : la planète doit rester entièrement visible quelle que soit
+    // la forme de l'écran, y compris après une rotation du téléphone. Le
+    // joueur garde le droit de zoomer plus près ensuite.
+    const fit = this._fitDistance();
+    this.fitDistance = fit;
+    if (this.controls) {
+      this.controls.maxDistance = Math.max(BALANCE.render.cameraMaxDistance, fit * 1.6);
+      if (this.controls.targetDistance < fit) {
+        this.controls.targetDistance = fit;
+        // Au tout premier cadrage, on évite l'animation de recul.
+        if (!this._framedOnce) this.controls.distance = fit;
+      }
+    }
+    this._framedOnce = true;
   }
 
   /** @returns {{fps:number, drawCalls:number, triangles:number, regions:number}} */

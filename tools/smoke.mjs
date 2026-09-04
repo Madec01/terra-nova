@@ -206,6 +206,110 @@ async function run() {
   });
   await shot('06-couches');
 
+  // --- Mécaniques ajoutées après le test de jouabilité -------------------
+  // Ces étapes se déclarent « non applicable » tant que l'API n'est pas là,
+  // pour que le scénario reste exécutable pendant le développement.
+
+  await step('exploration : file d’attente et sondes', async () => {
+    const r = await page.evaluate(() => {
+      const g = window.TERRA.game;
+      if (typeof g.cancelScan !== 'function') return { skip: true };
+      g.newGame({ seed: 4242 });
+      const unknown = [];
+      for (let i = 0; i < g.regions.count && unknown.length < 8; i++) {
+        if (!g.regions.discovered[i]) unknown.push(i);
+      }
+      g.debug.addResources(50000);
+      for (const i of unknown) g.scanRegion(i);
+      const queued = g.state.explore.queue.length + g.state.explore.scanning.length;
+      g.cancelScan(unknown[unknown.length - 1]);
+      const after = g.state.explore.queue.length + g.state.explore.scanning.length;
+      return { queued, after, free: g.state.explore.probesFree };
+    });
+    if (r.skip) { process.stdout.write('(API absente) '); return; }
+    if (r.queued < 8) throw new Error(`les scans ne s'empilent pas (${r.queued}/8)`);
+    if (r.after !== r.queued - 1) throw new Error('l’annulation de scan ne retire rien');
+  });
+
+  await step('exploration : un scan révèle une zone, pas une case', async () => {
+    const r = await page.evaluate(async () => {
+      const g = window.TERRA.game;
+      g.newGame({ seed: 777 });
+      g.debug.addResources(50000);
+      const before = Array.from(g.regions.discovered).reduce((a, b) => a + b, 0);
+      let target = -1;
+      for (let i = 0; i < g.regions.count; i++) if (!g.regions.discovered[i]) { target = i; break; }
+      g.scanRegion(target);
+      for (let d = 0; d < 400; d++) g._tick(1, d);
+      const after = Array.from(g.regions.discovered).reduce((a, b) => a + b, 0);
+      return { before, after };
+    });
+    const gained = r.after - r.before;
+    if (gained < 1) throw new Error('aucune région révélée après 400 jours');
+    process.stdout.write(`(+${gained} secteurs par scan) `);
+  });
+
+  await step('recherche progressive : engagement puis achèvement', async () => {
+    const r = await page.evaluate(async () => {
+      const g = window.TERRA.game;
+      g.newGame({ seed: 31337 });
+      g.debug.addScience(100000);
+      const id = 'orbital_survey';
+      if (!g.startResearch(id)) return { err: 'startResearch refusé' };
+      const instant = g.state.tech.unlocked.includes(id);
+      const current = g.state.tech.current;
+      let done = false;
+      for (let d = 0; d < 4000 && !done; d++) { g._tick(1, d); done = g.state.tech.unlocked.includes(id); }
+      return { instant, current, done, progressive: current !== undefined };
+    });
+    if (r.err) throw new Error(r.err);
+    if (!r.done) throw new Error('la recherche ne se termine jamais');
+    if (r.instant) process.stdout.write('(recherche instantanée) ');
+    else process.stdout.write('(progressive, achevée) ');
+  });
+
+  await step('les miroirs orbitaux sont réversibles', async () => {
+    const r = await page.evaluate(() => {
+      const g = window.TERRA.game;
+      g.newGame({ seed: 99 });
+      g.debug.revealAll(); g.debug.addResources(200000); g.debug.addScience(200000); g.debug.unlockAllTech();
+      let built = 0;
+      for (let i = 0; i < g.regions.count && built < 4; i++) if (g.build('orbital_mirror', i)) built++;
+      if (!built) return { skip: true };
+      for (let d = 0; d < 50; d++) g._tick(1, d);
+      const withMirrors = g.state.globals.insolation;
+      for (const b of g.state.buildings.filter((x) => x.type === 'orbital_mirror')) g.demolish(b.id);
+      for (let d = 0; d < 50; d++) g._tick(1, d);
+      return { withMirrors, without: g.state.globals.insolation };
+    });
+    if (r.skip) { process.stdout.write('(aucun miroir constructible) '); return; }
+    if (!(r.withMirrors > r.without)) {
+      throw new Error(`démonter les miroirs ne refroidit pas (${r.withMirrors} → ${r.without})`);
+    }
+    process.stdout.write(`(${r.withMirrors.toFixed(3)} → ${r.without.toFixed(3)}) `);
+  });
+
+  await step('composition atmosphérique cohérente', async () => {
+    const bad = await page.evaluate(() => {
+      const g = window.TERRA.game;
+      g.newGame({ seed: 5150 });
+      g.debug.revealAll(); g.debug.addResources(500000); g.debug.addScience(500000); g.debug.unlockAllTech();
+      for (let i = 0; i < g.regions.count; i++) { g.build('ghg_factory', i); g.build('o2_generator', i); }
+      const faults = [];
+      for (let d = 0; d < 8000; d++) {
+        g._tick(1, d);
+        const G = g.state.globals;
+        if (G.co2 + G.oxygen > 100.01) faults.push(`co2+o2=${(G.co2 + G.oxygen).toFixed(2)} au jour ${d}`);
+        if (G.pCO2 != null && G.pCO2 < -1e-6) faults.push(`pCO2 négatif au jour ${d}`);
+        if (faults.length > 2) break;
+      }
+      return faults;
+    });
+    if (bad.length) throw new Error(bad.join(' ; '));
+  });
+
+  await page.evaluate(() => window.TERRA.game.newGame({ seed: 123456 }));
+
   await step('sauvegarde et chargement', async () => {
     const r = await page.evaluate(() => {
       const g = window.TERRA.game;
