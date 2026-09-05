@@ -13,7 +13,8 @@
     "smoke:shot": "node tools/smoke.mjs --shot",
     "boot": "node tools/boot-check.mjs",
     "mobile": "node tools/mobile-check.mjs",
-    "pages": "node tools/pages-check.mjs"
+    "pages": "node tools/pages-check.mjs",
+    "audio": "node tools/audio-check.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"
