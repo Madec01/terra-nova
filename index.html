@@ -27,5 +27,40 @@
   </div>
 
   <script type="module" src="./src/main.js"></script>
+
+  <script>
+    /* Filet de sécurité : si le module principal ne s'exécute pas (fichiers
+       servis sans build, import non résolu, WebGL absent), le jeu restait
+       indéfiniment sur « Initialisation du système orbital… » sans rien dire.
+       Un écran figé n'est pas un message d'erreur : on explique. */
+    (function () {
+      var diagnostic = null;
+      window.addEventListener('error', function (e) {
+        var m = (e && (e.message || (e.target && e.target.src))) || '';
+        if (/Failed to resolve module|Failed to fetch dynamically imported|MIME type/i.test(String(m))) {
+          diagnostic = 'Les fichiers source sont servis sans avoir été construits.';
+        }
+      }, true);
+
+      setTimeout(function () {
+        var boot = document.getElementById('boot');
+        if (!boot || window.TERRA) return;          // le jeu a démarré : rien à faire
+        boot.innerHTML =
+          '<div class="boot-inner">' +
+          '<div class="boot-title">TERRA NOVA</div>' +
+          '<div class="boot-sub" style="max-width:34em;line-height:1.6">' +
+          '<strong>Le jeu n\u2019a pas pu d\u00e9marrer.</strong><br><br>' +
+          (diagnostic ? diagnostic + '<br><br>' : '') +
+          'TERRA NOVA doit \u00eatre <em>construit</em> avant d\u2019\u00eatre publi\u00e9 : ' +
+          'le code source utilise des imports de paquets qu\u2019un navigateur ne sait pas ' +
+          'r\u00e9soudre seul.<br><br>' +
+          'En local : <code>npm install</code> puis <code>npm run dev</code>.<br>' +
+          'Sur GitHub Pages : r\u00e9glez la source sur <em>GitHub Actions</em> ' +
+          '(Settings \u2192 Pages), le d\u00e9p\u00f4t contient d\u00e9j\u00e0 le workflow.<br><br>' +
+          'D\u00e9tail technique dans la console du navigateur.' +
+          '</div></div>';
+      }, 12000);
+    })();
+  </script>
 </body>
 </html>
