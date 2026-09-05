@@ -221,6 +221,29 @@ body:has(.tn-ui.is-scanning) > canvas { cursor: cell; }
 }
 .tn-center-stack > *:not([hidden]) { pointer-events: auto; }
 
+/* Tutoriel : encart d'accompagnement de la première partie.
+   Ancré SOUS la barre du haut, au-dessus de la planète — donc jamais sur le
+   rail d'outils (à gauche), la fiche de secteur (à droite), les contrôles du
+   temps ni la barre d'onglets (en bas), qui sont précisément les commandes
+   qu'il désigne. */
+.tn-tut {
+  position: absolute;
+  top: calc(var(--tn-top-h) + var(--tn-gap));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 2 * var(--tn-gap)));
+  z-index: 46;
+}
+/* Le halo suit la commande désignée. Il ne reçoit JAMAIS le pointeur : la
+   règle `.tn-ui > *` le rendrait cliquable, et il volerait le clic. */
+.tn-tut-ring {
+  position: fixed;
+  top: 0; left: 0;
+  pointer-events: none;
+  z-index: 55;
+  transition: transform var(--tn-slow) ease, width var(--tn-slow) ease, height var(--tn-slow) ease;
+}
+
 /* Conteneur du bas : contrôles du temps sur ordinateur, contrôles du temps
    + barre d'onglets sur téléphone. Rien n'est déplacé dans le DOM. */
 .tn-bottom {
@@ -536,8 +559,38 @@ html.tn-phone .tn-center-stack {
   width: calc(100vw - 16px);
   z-index: 44;
 }
-html.tn-phone .tn-banner,
-html.tn-phone .tn-hintbar { width: 100%; }
+html.tn-phone .tn-banner { width: 100%; }
+
+/* Tutoriel sur téléphone : pleine largeur en haut. Le bandeau de mode, les
+   bulles et les feuilles se rangent DESSOUS — `--tn-tut-h` est publiée par
+   Tutorial.js à chaque changement de hauteur. */
+html.tn-phone .tn-tut {
+  left: 8px; right: 8px;
+  width: auto;
+  transform: none;
+  top: calc(var(--tn-top-h) + 6px);
+}
+html.tn-phone .tn-ui.has-tutorial .tn-center-stack,
+html.tn-phone .tn-ui.has-tutorial .tn-notifs {
+  top: calc(var(--tn-top-h) + 12px + var(--tn-tut-h, 0px));
+}
+html.tn-phone .tn-ui.has-tutorial.is-placing .tn-notifs,
+html.tn-phone .tn-ui.has-tutorial.is-scanning .tn-notifs {
+  top: calc(var(--tn-top-h) + 88px + var(--tn-tut-h, 0px));
+}
+/* Les feuilles montaient jusqu'à 64 % de la hauteur : elles seraient passées
+   sous l'encart, et le joueur n'aurait plus vu la consigne qui parle du bouton
+   qu'il cherche. Elles cèdent la place le temps du tutoriel. */
+html.tn-phone .tn-ui.has-tutorial .tn-dock,
+html.tn-phone .tn-ui.has-tutorial .tn-region {
+  max-height: min(52vh, calc(100vh - var(--tn-top-h) - var(--tn-bottom-h) - var(--tn-tut-h, 0px) - 22px));
+}
+/* La feuille réduite masque son débordement : rétrécie, elle pourrait couper
+   le bouton même que la consigne désigne. Le temps du tutoriel, elle défile. */
+html.tn-phone .tn-ui.has-tutorial .tn-region.is-peek .tn-panel-body { overflow-y: auto; }
+/* Un encart plus court laisse plus de place aux feuilles ; le texte défile,
+   mais la consigne reste sous les yeux (voir .tn-tut-text dans panels.css). */
+html.tn-phone .tn-tut-text { max-height: 24vh; }
 html.tn-phone .tn-notifs {
   left: 8px; right: 8px; width: auto;
   top: calc(var(--tn-top-h) + 6px);
@@ -608,6 +661,24 @@ html.tn-phone-land .tn-ui.has-region .tn-center-stack {
 html.tn-phone-land .tn-ui.has-panel .tn-center-stack {
   left: calc(8px + var(--tn-safe-l)); right: auto; transform: none; max-width: 46vw;
 }
+
+/* En paysage les feuilles occupent les côtés : elles gardent toute leur
+   hauteur, et c'est l'encart qui se décale. */
+html.tn-phone-land .tn-tut {
+  top: calc(var(--tn-top-h) + 4px);
+  left: 50%; right: auto;
+  transform: translateX(-50%);
+  width: min(360px, 46vw);
+}
+html.tn-phone-land .tn-ui.has-region .tn-tut {
+  left: auto; right: calc(8px + var(--tn-safe-r)); transform: none;
+}
+html.tn-phone-land .tn-ui.has-panel .tn-tut {
+  left: calc(8px + var(--tn-safe-l)); right: auto; transform: none;
+}
+html.tn-phone-land .tn-ui.has-tutorial .tn-dock { max-height: 100%; }
+html.tn-phone-land .tn-ui.has-tutorial .tn-region { max-height: none; }
+html.tn-phone-land .tn-tut-text { max-height: 34vh; }
 
 /* --- 5. Zones sûres sur les surfaces plein écran ---------------------- */
 html.tn-phone .tn-overlay {

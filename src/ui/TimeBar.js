@@ -35,7 +35,7 @@ export class TimeBar {
     for (const s of SPEEDS.filter((s) => BALANCE.time.speeds.includes(s.value))) {
       const btn = el('button', {
         class: 'tn-speed', type: 'button', 'aria-label': s.aria, 'aria-pressed': 'false',
-        'data-tip': s.tip, text: s.label,
+        'data-tip': s.tip, text: s.label, dataset: { speed: String(s.value) },
       });
       this._offs.push(on(btn, 'click', () => { if (this.game.state) this.game.setSpeed(s.value); }));
       this.buttons.push({ def: s, btn });

@@ -52,6 +52,18 @@ export class MainMenu {
     this._offs.push(on(this.newBtn, 'click', () => this._newGame()));
     this._offs.push(on(this.resumeBtn, 'click', () => this.close()));
 
+    // Le tutoriel ne se montre qu'à la première partie : sans cette entrée,
+    // un joueur qui l'a fermé n'aurait aucun moyen de le retrouver.
+    this.tutorialBtn = el('button', {
+      class: 'tn-btn tn-btn--wide', type: 'button', dataset: { action: 'tutorial' },
+    },
+      el('span', { text: 'Revoir le tutoriel' }),
+      el('small', { text: 'accompagnement pas à pas de la première partie' }));
+    this._offs.push(on(this.tutorialBtn, 'click', () => {
+      this.close();
+      this.ui?.restartTutorial?.();
+    }));
+
     this.node = el('div', { class: 'tn-overlay tn-menu', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Menu principal' },
       el('div', { class: 'tn-menu-panel' },
         el('div', { class: 'tn-menu-brand' },
@@ -60,6 +72,7 @@ export class MainMenu {
         el('p', { class: 'tn-menu-lore', text: 'Une planète morte tourne sous votre sonde de commandement. Cartographiez sa surface, épaississez son atmosphère, réchauffez sa croûte, faites couler l’eau, puis semez la vie. La mission est réussie lorsque sept indicateurs planétaires se maintiennent ensemble pendant 180 jours.' }),
 
         this.resumeBtn,
+        this.tutorialBtn,
 
         el('div', { class: 'tn-section-title', text: 'Genèse' }),
         el('div', { class: 'tn-field' },
@@ -87,6 +100,8 @@ export class MainMenu {
     this.node.hidden = false;
     this.node.classList.toggle('is-system', mode === 'system');
     this.resumeBtn.hidden = !(mode === 'system' && this.game.state);
+    // Sans partie en cours, il n'y a rien à accompagner : on cache l'entrée.
+    this.tutorialBtn.hidden = !this.game.state;
     this.newBtn.textContent = mode === 'system' ? 'Redémarrer une partie' : 'Nouvelle partie';
     requestAnimationFrame(() => this.node.classList.add('is-in'));
   }

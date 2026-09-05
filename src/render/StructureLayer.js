@@ -520,6 +520,30 @@ const DEFAULT_TUNING = {
   scale: 1, orbit: 0, spin: 0, transparent: false, opacity: 1, farKeep: 0, tilt: 0,
 };
 
+/**
+ * Rayon — distance au centre de la planète — auquel doit flotter le MARQUEUR
+ * d'un bâtiment de ce type : juste au-dessus de son sommet, avec un cheveu de
+ * dégagement.
+ *
+ * Exporté pour que `BuildingMarkers` ne devienne pas une SECONDE source de
+ * vérité sur l'échelle des modèles : l'emprise, l'enfoncement et l'altitude
+ * orbitale sont ceux-là mêmes qui servent à instancier la géométrie, quelques
+ * lignes plus bas.
+ *
+ * @param {string} type
+ * @param {number} cellRadius   rayon déplacé de la cellule (PlanetMesh.cellRadius)
+ * @param {number} cellDiameter diamètre de la cellule (2 × PlanetMesh.cellSize)
+ * @returns {number}
+ */
+export function markerRadius(type, cellRadius, cellDiameter) {
+  const tune = TUNING[type] ? { ...DEFAULT_TUNING, ...TUNING[type] } : DEFAULT_TUNING;
+  const size = cellDiameter * FOOTPRINT * tune.scale;
+  // Structure orbitale : `fitModel` l'a centrée en y, son sommet est donc à
+  // une demi-hauteur au-dessus de son ancrage.
+  if (tune.orbit > 0) return tune.orbit + size * MAX_ASPECT * 0.5 + size * 0.5;
+  return cellRadius - size * SINK + size * MAX_ASPECT + size * 0.5;
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Matériau                                                                  */
 /* -------------------------------------------------------------------------- */

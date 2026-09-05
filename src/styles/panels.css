@@ -1172,25 +1172,111 @@ html.tn-phone .tn-scrim {
 .tn-card, .tn-tech { cursor: pointer; }
 .tn-card[aria-disabled="true"], .tn-tech[aria-disabled="true"] { cursor: default; }
 
-/* --- Amorce des premières minutes ------------------------------------- */
-.tn-hintbar {
+/* --- Tutoriel contextuel ----------------------------------------------- */
+/*  Un encart, une étape, refermable. Il n'occulte rien : il est posé au-dessus
+    de la planète, jamais au-dessus des commandes dont il parle (le placement
+    est dans main.css, et Tutorial.js le replie s'il croise sa propre cible). */
+.tn-tut {
+  display: flex;
+  flex-direction: column;
+  background: rgba(12, 17, 26, 0.95);
+  border: 1px solid var(--tn-accent-line);
+  border-left: 3px solid var(--tn-accent);
+  box-shadow: var(--tn-shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: tn-slide-in var(--tn-slow) ease;
+}
+
+.tn-tut-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 2px 10px;
+  border-bottom: 1px solid var(--tn-line);
+  cursor: pointer;
+}
+.tn-tut.is-folded .tn-tut-head { border-bottom: 0; }
+.tn-tut-mark { color: var(--tn-accent); font-family: var(--tn-mono); font-size: 12px; }
+.tn-tut-count {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--tn-dim);
+  flex: 0 0 auto;
+}
+.tn-tut-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: var(--tn-text);
+  padding: 6px 0;
+}
+.tn-tut.is-folded .tn-tut-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tn-tut-body { padding: 8px 10px 2px; }
+/* Seule l'EXPLICATION défile. La consigne, elle, reste toujours visible :
+   sur un téléphone, elle passait sous la ligne de flottaison des étapes
+   bavardes — c'est-à-dire la seule ligne dont le joueur a besoin. */
+.tn-tut-text {
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.tn-tut-text p {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--tn-text);
+  margin: 0 0 7px;
+}
+.tn-tut.is-compact .tn-tut-text { display: none; }
+
+.tn-tut-action {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--tn-accent);
+  background: var(--tn-accent-soft);
+  border-left: 2px solid var(--tn-accent);
+}
+.tn-tut-action-icon { font-family: var(--tn-mono); }
+.tn-tut.is-globe .tn-tut-action { border-left-color: var(--tn-accent-2); }
+
+.tn-tut-foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 6px 7px 10px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--tn-text);
-  background: rgba(14, 20, 29, 0.94);
-  border: 1px solid var(--tn-accent-line);
-  border-left: 3px solid var(--tn-accent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: var(--tn-shadow);
-  animation: tn-slide-in var(--tn-slow) ease;
+  padding: 4px 8px 6px;
 }
-.tn-hintbar-icon { color: var(--tn-accent); font-family: var(--tn-mono); }
-.tn-hint-text { flex: 1 1 auto; }
+.tn-tut-dots { display: flex; gap: 4px; flex: 1 1 auto; flex-wrap: wrap; }
+.tn-tut-dots i {
+  width: 5px; height: 5px;
+  background: var(--tn-line-2);
+  border-radius: 50%;
+}
+.tn-tut-dots i.is-done { background: var(--tn-accent-line); }
+.tn-tut-dots i.is-current {
+  background: var(--tn-accent);
+  box-shadow: 0 0 0 2px rgba(95, 211, 232, 0.22);
+}
+
+/* Halo de désignation : posé PAR-DESSUS la commande, sans jamais la capter. */
+.tn-tut-ring {
+  border: 1px solid var(--tn-accent);
+  box-shadow: 0 0 0 3px rgba(95, 211, 232, 0.16), 0 0 12px rgba(95, 211, 232, 0.35);
+}
+.tn-tut-target { outline: 1px solid var(--tn-accent-line); outline-offset: 1px; }
 
 /* --- Divers ------------------------------------------------------------ */
 .tn-phone-only { display: none; }

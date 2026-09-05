@@ -9,6 +9,8 @@ import { PLANET_TYPE_LIST } from './planet/PlanetGenerator.js';
 import { SceneManager } from './render/SceneManager.js';
 import { UIManager } from './ui/UIManager.js';
 import { AudioManager } from './audio/AudioManager.js';
+import { AudioEngine } from './audio/AudioEngine.js';
+import { MUSIC_TRACKS } from './data/audio.js';
 import { BALANCE } from './data/balance.js';
 import { makeSeedLabel } from './utils/rng.js';
 
@@ -30,7 +32,7 @@ function boot() {
   const uiRoot = document.getElementById('ui');
 
   const game = new Game();
-  const audio = new AudioManager({ basePath: './audio/' });
+  const audio = new AudioManager();
   game.audio = audio;
   // Le menu d'accueil propose les types de monde sans importer le générateur
   // (l'interface n'a pas le droit de dépendre de la couche planète).
@@ -93,6 +95,11 @@ function boot() {
   game.bus.on('event:triggered', () => audio.play('event'));
   game.bus.on('victory', () => audio.play('victory'));
   game.bus.on('notify', ({ kind }) => { if (kind === 'warn' || kind === 'danger') audio.play('error'); });
+
+  // La musique suit l'état de la planète : à chaque phase de progression son
+  // morceau. La bande-son devient ainsi une récompense de plus, au même titre
+  // que la transformation visuelle du monde. `setMood` ignore les répétitions.
+  game.bus.on('game:tick', ({ state }) => audio.setMood(state?.progress?.phase ?? 1));
 
   /* ------------------------------------------------------------------ */
   /*  Interaction avec la planète                                        */
@@ -171,8 +178,9 @@ function boot() {
 
   requestAnimationFrame(frame);
 
-  // Exposé pour le débogage manuel dans la console.
-  window.TERRA = { game, scene, ui, audio, BALANCE };
+  // Exposé pour le débogage manuel dans la console — et pour `tools/audio-check.mjs`,
+  // qui instancie le moteur dans un OfflineAudioContext pour le mesurer.
+  window.TERRA = { game, scene, ui, audio, BALANCE, AudioEngine, MUSIC_TRACKS };
 }
 
 window.addEventListener('error', (e) => {

@@ -33,6 +33,7 @@ import { AtmosphereMesh } from './AtmosphereMesh.js';
 import { CloudMesh } from './CloudMesh.js';
 import { StarField } from './StarField.js';
 import { StructureLayer } from './StructureLayer.js';
+import { BuildingMarkers } from './BuildingMarkers.js';
 import { SelectionOverlay } from './SelectionOverlay.js';
 import { OrbitControls } from './OrbitControls.js';
 
@@ -113,6 +114,12 @@ export class SceneManager {
 
     this.structures = new StructureLayer(this.shared);
     this.scene.add(this.structures.object3D);
+
+    // Pictogrammes flottant au-dessus des bâtiments : un seul draw call pour
+    // tous. Ils COMPLÈTENT les modèles 3D — sans eux, à distance de jeu, les
+    // petits types se ressemblaient tous.
+    this.markers = new BuildingMarkers(this.shared);
+    this.scene.add(this.markers.object3D);
 
     this.planet = null;
     this.overlay = null;
@@ -234,6 +241,7 @@ export class SceneManager {
       this.overlay = null;
     }
     this.structures.clear();
+    this.markers.clear();
 
     this.regions = regions;
     // Les uniforms globaux (soleil, temps, insolation) sont partagés avec
@@ -253,6 +261,8 @@ export class SceneManager {
     this.scene.add(this.overlay.object3D);
 
     this.structures.setPlanet(this.planet);
+    this.markers.setPlanet(this.planet);
+    this.markers.clear();
 
     this.selected = null;
     this.hovered = null;
@@ -315,8 +325,18 @@ export class SceneManager {
   syncBuildings(state) {
     if (!this.planet || !this.regions) return;
     this.structures.sync(state, this.regions);
+    this.markers.sync(state, this.regions);
     this._buildingsDirty = false;
   }
+
+  /**
+   * Affiche ou masque les pictogrammes de bâtiments (ajout, hors contrat §5).
+   * @param {boolean} v
+   */
+  setMarkersVisible(v) { this.markers.setVisible(v); }
+
+  /** @returns {boolean} les pictogrammes sont-ils affichés ? */
+  get markersVisible() { return this.markers.visible; }
 
   pulse(regionId) { if (this.overlay) this.overlay.pulse(regionId); }
 
@@ -535,6 +555,10 @@ export class SceneManager {
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
     this.sky.setPixelRatio(this.renderer.getPixelRatio());
+    // Les marqueurs visent une taille en PIXELS CSS : elle ne dépend que de la
+    // hauteur du canvas et de l'ouverture, donc elle se recalcule ici et
+    // nulle part ailleurs — jamais par frame.
+    this.markers.setViewport(h, this.camera.fov);
 
     // Recadrage : la planète doit rester entièrement visible quelle que soit
     // la forme de l'écran, y compris après une rotation du téléphone. Le
@@ -572,6 +596,7 @@ export class SceneManager {
 
     if (this.planet) { this.scene.remove(this.planet.object3D); this.planet.dispose(); this.planet = null; }
     if (this.overlay) { this.scene.remove(this.overlay.object3D); this.overlay.dispose(); this.overlay = null; }
+    this.scene.remove(this.markers.object3D); this.markers.dispose();
     this.scene.remove(this.structures.object3D); this.structures.dispose();
     this.scene.remove(this.clouds.object3D); this.clouds.dispose();
     this.scene.remove(this.atmosphere.object3D); this.atmosphere.dispose();

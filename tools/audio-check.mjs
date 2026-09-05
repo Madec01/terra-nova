@@ -27,6 +27,14 @@ const SEUILS = {
   rmsMin: 0.0005,
   variationMinMusique: 0.08,
   morceauxMin: 4,
+  /* Plancher de PRÉSENCE. Un haut-parleur de téléphone ne restitue quasiment
+     rien sous ~400 Hz : un morceau dont toute l'énergie est dans le grave est
+     magnifique au casque et SILENCIEUX sur le mobile — or le jeu se joue
+     beaucoup sur téléphone. On exige donc une part minimale d'énergie dans la
+     bande réellement reproductible, et un centroïde qui ne s'effondre pas. */
+  presenceMin: 0.15,          // part d'énergie entre 400 Hz et 5 kHz
+  centroideMinMusique: 180,   // Hz
+  centroideMinSfx: 200,
 };
 
 function chromiumPath() {
@@ -131,16 +139,18 @@ const ANALYSE = `
       for (let k = 0; k < N / 2; k++) bandes[k] += Math.hypot(re[k], im[k]);
       fenetres++;
     }
-    let total = 0, pondere = 0, aigu = 0;
+    let total = 0, pondere = 0, aigu = 0, presence = 0;
     for (let k = 1; k < N / 2; k++) {
       const f = k * sr / N, m = bandes[k] / Math.max(1, fenetres);
       total += m; pondere += m * f;
       if (f > 5000) aigu += m;
+      if (f >= 400 && f <= 5000) presence += m;   // bande audible sur un téléphone
     }
     return {
       crete, rms, attaqueMs, queueMs, variation,
       centroide: total > 0 ? pondere / total : 0,
       partAigu: total > 0 ? aigu / total : 0,
+      presence: total > 0 ? presence / total : 0,
       dureeMs: (n / sr) * 1000,
     };
   };
@@ -204,7 +214,7 @@ const run = async () => {
   const defauts = [];
   const ligne = (n, m, regles) => {
     const ko = regles.filter(r => !r.ok);
-    console.log(`  ${ko.length ? '✘' : '✔'} ${n.padEnd(14)} crête ${m.crete.toFixed(2)} · attaque ${m.attaqueMs.toFixed(0)} ms · queue ${m.queueMs.toFixed(0)} ms · aigu ${(m.partAigu * 100).toFixed(1)} % · centroïde ${m.centroide.toFixed(0)} Hz`);
+    console.log(`  ${ko.length ? '✘' : '✔'} ${n.padEnd(16)} crête ${m.crete.toFixed(2)} · attaque ${String(m.attaqueMs.toFixed(0)).padStart(4)} ms · queue ${String(m.queueMs.toFixed(0)).padStart(5)} ms · aigu ${(m.partAigu * 100).toFixed(1)} % · centroïde ${String(m.centroide.toFixed(0)).padStart(4)} Hz · présence tél. ${(m.presence * 100).toFixed(0)} %`);
     ko.forEach(r => { console.log(`      → ${r.msg}`); defauts.push(`${n} : ${r.msg}`); });
   };
 
@@ -218,6 +228,8 @@ const run = async () => {
       { ok: m.queueMs >= S.queueMinMs, msg: `pas de queue (${m.queueMs.toFixed(0)} ms < ${S.queueMinMs})` },
       { ok: m.partAigu <= S.aiguMax, msg: `trop d'aigu (${(m.partAigu * 100).toFixed(1)} % > ${S.aiguMax * 100} %)` },
       { ok: m.centroide <= S.centroideMaxSfx, msg: `trop brillant (${m.centroide.toFixed(0)} Hz)` },
+      { ok: m.centroide >= S.centroideMinSfx, msg: `trop sourd (${m.centroide.toFixed(0)} Hz) : inaudible sur un téléphone` },
+      { ok: m.presence >= S.presenceMin, msg: `pas assez de présence (${(m.presence * 100).toFixed(0)} % entre 400 Hz et 5 kHz, minimum ${S.presenceMin * 100} %) : sera silencieux sur un haut-parleur de téléphone` },
     ]);
   }
 
@@ -233,6 +245,8 @@ const run = async () => {
       { ok: m.rms > S.rmsMin, msg: 'silencieux' },
       { ok: m.centroide <= S.centroideMaxMusique, msg: `trop brillant pour une nappe (${m.centroide.toFixed(0)} Hz)` },
       { ok: m.variation >= S.variationMinMusique, msg: `nappe figée (variation ${(m.variation * 100).toFixed(0)} %)` },
+      { ok: m.centroide >= S.centroideMinMusique, msg: `trop sourd (${m.centroide.toFixed(0)} Hz) : quasi inaudible sur un haut-parleur de téléphone` },
+      { ok: m.presence >= S.presenceMin, msg: `pas assez de présence (${(m.presence * 100).toFixed(0)} % entre 400 Hz et 5 kHz, minimum ${S.presenceMin * 100} %)` },
     ]);
     empreintes.push({ t, c: m.centroide, r: m.rms });
   }

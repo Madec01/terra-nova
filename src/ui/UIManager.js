@@ -27,6 +27,7 @@ import { PlanetStatusPanel } from './PlanetStatusPanel.js';
 import { TimeBar } from './TimeBar.js';
 import { DebugPanel } from './DebugPanel.js';
 import { MainMenu } from './MainMenu.js';
+import { Tutorial } from './Tutorial.js';
 
 const NB = '\u00A0';
 
@@ -100,6 +101,7 @@ export class UIManager {
     this.notifications = new Notifications(this.root, this.scene, this.game);
     this.debugPanel = new DebugPanel(ctx);
     this.mainMenu = new MainMenu(ctx);
+    this.tutorial = new Tutorial(ctx);
 
     this.panels.build = new BuildMenu(ctx);
     this.panels.layers = new LayersPanel(ctx);
@@ -115,6 +117,7 @@ export class UIManager {
     this.root.appendChild(this._buildBottom());
     this.root.appendChild(this._buildBanner());
     this.notifications.mount();
+    this.root.appendChild(this.tutorial.mount());
     this.root.appendChild(this.debugPanel.mount());
     this.root.appendChild(this.mainMenu.mount());
     this.tooltip.mount();
@@ -215,21 +218,10 @@ export class UIManager {
       this.bannerText, cancel);
     this.banner.hidden = true;
 
-    // Amorce des premières minutes : que faire, maintenant, tout de suite.
-    this.hintText = el('span', { class: 'tn-hint-text' });
-    const hintClose = el('button', {
-      class: 'tn-icon-btn', type: 'button', 'aria-label': 'Masquer le conseil', text: '×',
-    });
-    this._offs.push(on(hintClose, 'click', () => { this._hintDone = true; this.hintBar.hidden = true; }));
-    this.hintBar = el('div', { class: 'tn-hintbar', role: 'status' },
-      el('span', { class: 'tn-hintbar-icon', 'aria-hidden': 'true', text: '◈' }),
-      this.hintText, hintClose);
-    this.hintBar.hidden = true;
-
     this.flash = el('div', { class: 'tn-flash', role: 'status', 'aria-live': 'polite' });
     this.flash.hidden = true;
 
-    return el('div', { class: 'tn-center-stack' }, this.hintBar, this.banner, this.flash);
+    return el('div', { class: 'tn-center-stack' }, this.banner, this.flash);
   }
 
   /* =================================================================== */
@@ -340,8 +332,8 @@ export class UIManager {
 
     sub('victory', ({ state } = {}) => this.showVictory(state || this.game.state));
 
-    sub('game:new', () => this._onNewState());
-    sub('game:loaded', () => this._onNewState());
+    sub('game:new', () => this._onNewState(false));
+    sub('game:loaded', () => this._onNewState(true));
   }
 
   /**
@@ -368,7 +360,7 @@ export class UIManager {
     this._flash(n === 1 ? 'Secteur cartographié' : `${n} secteurs cartographiés`);
   }
 
-  _onNewState() {
+  _onNewState(loaded = false) {
     this.cancelPlacement();
     this.setScanMode(false);
     this.regionPanel.setRegion(null);
@@ -380,19 +372,20 @@ export class UIManager {
     this.panels.log?.reset?.();
     if (this.mainMenu.visible) this.mainMenu.close();
     this.feed.length = 0;
-    this._hintDone = false;
-    this._showOnboarding();
     this._applyMode();
+    // Le tutoriel ne s'invite qu'à la première partie : une partie chargée
+    // n'a plus rien à apprendre au joueur.
+    if (loaded) this.tutorial.onLoadedGame();
+    else this.tutorial.onNewGame();
     this.update(this.game.state);
   }
 
-  /** Première consigne : le joueur sait quoi faire dans les dix secondes. */
-  _showOnboarding() {
-    if (!this.hintBar) return;
-    const verb = this.isTouch ? 'Appuyez' : 'Cliquez';
-    this.hintText.textContent = 'Objectif : cartographier trois secteurs. '
-      + verb + ' sur un secteur sombre, puis sur « Lancer un scan orbital ».';
-    this.hintBar.hidden = false;
+  /** Relance le tutoriel depuis le menu (entrée « Revoir le tutoriel »). */
+  restartTutorial() {
+    this.closePanel();
+    this.cancelPlacement();
+    this.setScanMode(false);
+    this.tutorial.start();
   }
 
   /* =================================================================== */
@@ -689,15 +682,12 @@ export class UIManager {
     this.root.classList.toggle('is-empty', !s);
     if (!s) return;
 
-    if (!this._hintDone && this.hintBar && !this.hintBar.hidden) {
-      const scanned = (s.stats?.scanned ?? 0) + (s.explore?.scanning?.length ?? 0);
-      if (scanned > 0) { this._hintDone = true; this.hintBar.hidden = true; }
-    }
     this.topBar.update(s);
     this.timeBar.update(s);
     this.regionPanel.update(s);
     if (this.activePanel) this.panels[this.activePanel]?.update?.(s);
     this.debugPanel.update(s);
+    this.tutorial.update(s);
     this._lastDay = s.time?.day ?? 0;
   }
 
@@ -767,12 +757,13 @@ export class UIManager {
     this.notifications?.destroy();
     this.debugPanel?.destroy();
     this.mainMenu?.destroy();
+    this.tutorial?.destroy();
     this.tooltip?.destroy();
     this._victoryNode?.remove();
     this._victoryNode = null;
 
     clear(this.root);
-    this.root.classList.remove('tn-ui', 'is-placing', 'is-empty');
+    this.root.classList.remove('tn-ui', 'is-placing', 'is-empty', 'has-tutorial');
     this._mounted = false;
   }
 }

@@ -211,7 +211,9 @@ export class RegionPanel {
     const cost = BALANCE.exploration.scanCost || {};
     const costText = Object.keys(cost).map((k) => `${cost[k]}${NB}${labelResource(k)}`).join(', ') || 'gratuit';
 
-    const btn = el('button', { class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button' },
+    const btn = el('button', {
+      class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button', dataset: { action: 'scan' },
+    },
       el('span', { text: 'Lancer un scan orbital' }),
       el('small', { text: `${costText} · ${days}${NB}j` }));
     const chain = el('button', { class: 'tn-btn tn-btn--wide', type: 'button' },
@@ -279,7 +281,10 @@ export class RegionPanel {
     refs.habitability = this._kv(mini, 'Habitabilité');
     refs.buildCount = this._kv(mini, 'Installations');
 
-    const buildBtn = el('button', { class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button', text: 'Construire ici' });
+    const buildBtn = el('button', {
+      class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button',
+      dataset: { action: 'build' }, text: 'Construire ici',
+    });
     this._offs.push(on(buildBtn, 'click', () => this.ui?.openBuildMenuFor?.(this.regionId)));
 
     this.body.appendChild(el('div', { class: 'tn-region-summary' },

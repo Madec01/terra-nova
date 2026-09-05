@@ -1,25 +1,17 @@
 # Ressources audio
 
-Ce dossier est volontairement vide.
+Ce dossier est vide, et il le restera : **TERRA NOVA n'utilise aucun fichier
+audio**. Effets et musique sont entièrement synthétisés par WebAudio au moment
+où on les entend.
 
-`src/audio/AudioManager.js` tente de charger les fichiers ci-dessous ; s'ils sont
-absents (cas par défaut), il **retombe silencieusement sur une synthèse WebAudio**
-et le jeu fonctionne sans la moindre erreur.
+Ce n'est pas un pis-aller mais un choix : rien à télécharger, aucun décodage,
+et deux déclenchements du même effet ne sont jamais strictement identiques.
+Le chargement de fichiers a été retiré de `AudioManager` — y déposer des `.mp3`
+n'aurait aucun effet.
 
-Déposez simplement les fichiers pour remplacer les sons de synthèse :
+Tout se règle ailleurs :
 
-| fichier | usage |
-|---|---|
-| `ui_click.mp3` | clic d'interface |
-| `ui_select.mp3` | ouverture de panneau |
-| `region.mp3` | sélection d'une région |
-| `build.mp3` | construction |
-| `scan.mp3` | scan orbital |
-| `research.mp3` | technologie acquise |
-| `discovery.mp3` | région révélée |
-| `event.mp3` | événement planétaire |
-| `error.mp3` | action refusée |
-| `victory.mp3` | victoire |
-
-Une nappe d'ambiance spatiale est également synthétisée en continu
-(`AudioManager.startAmbient`).
+- `src/data/audio.js` — la palette d'effets et la définition des cinq morceaux ;
+- `src/audio/AudioEngine.js` — la chaîne (réverbération, bus, compresseur) ;
+- `src/audio/Sfx.js` et `src/audio/Music.js` — les deux générateurs ;
+- `docs/AUDIO.md` — le contrat et les critères mesurables (`npm run audio`).

@@ -133,8 +133,10 @@ src/
   render/              SceneManager, PlanetMesh + shaders, atmosphère, nuages,
                        étoiles, bâtiments (InstancedMesh), sélection, contrôles
   ui/                  UIManager et panneaux (vanilla DOM, zéro framework)
+  audio/               AudioEngine (chaîne + réverbération), Sfx, Music, AudioManager
   data/                balance.js, buildings.js, technologies.js, biomes.js,
                        events.js, layers.js  ← tout l'équilibrage est ici
+                       audio.js  ← toute la palette sonore et les morceaux
   utils/               bruit simplex, RNG déterministe, maths
 ```
 
@@ -161,3 +163,50 @@ sauvegarde ne stocke donc que la seed plus les données réellement mutables
 - Un `InstancedMesh` par type de bâtiment.
 - Boucle de rendu et boucle de simulation **séparées** : la simulation tourne à
   pas fixe, indépendamment du framerate.
+
+## Son
+
+**Aucun fichier audio.** Tout est synthétisé par WebAudio au moment où on
+l'entend : rien à télécharger, et une variété infinie — deux déclenchements du
+même effet ne sont jamais strictement identiques.
+
+La chaîne est la suivante :
+
+```
+source → enveloppe → filtre → [envoi réverb] → bus (musique | effets)
+       → maître → compresseur → sortie
+```
+
+La **réverbération est une réponse impulsionnelle générée** — du bruit à
+décroissance exponentielle, amorti progressivement dans l'aigu. C'est elle qui
+retire l'essentiel du caractère « synthétique sec » : sans queue de salle, un
+son paraît collé à l'oreille. Les autres règles tenues partout : jamais
+d'attaque instantanée (elle fait « clic », c'est LA signature du son
+numérique), sinus et triangle empilés en harmoniques choisies plutôt que carré
+ou dents de scie, passe-bas systématique, léger désaccord entre les voix.
+
+**Cinq morceaux d'ambiance génératifs**, un par phase de progression : de
+*Poussière froide* (planète morte, presque immobile) à *Lanternes*
+(colonisation, habité). Chacun a sa fondamentale, sa gamme, ses timbres et sa
+densité. Un morceau n'est pas une boucle mais un bourdon continu, des nappes
+tenues qui se croisent et des textures éparses — il ne se répète jamais à
+l'identique et ne reste jamais figé. La musique suit l'état de la planète : la
+bande-son est une récompense au même titre que la transformation visuelle.
+
+Tout est programmé sur l'horloge de l'AudioContext, jamais avec `setTimeout` :
+c'est ce qui permet de rendre et de **mesurer** la couche audio hors ligne.
+
+```bash
+npm run audio     # rend chaque son et chaque morceau dans un OfflineAudioContext
+```
+
+L'outil mesure crête, temps d'attaque, longueur de queue, part d'énergie
+au-dessus de 5 kHz, centroïde spectral et variation temporelle. Personne ne peut
+tester « c'est agréable » ; en revanche, ce qui rendait l'ancien son
+désagréable est parfaitement mesurable. Les seuils sont dans
+[`docs/AUDIO.md`](docs/AUDIO.md).
+
+Toutes les valeurs — fréquences, enveloppes, gammes, définition des morceaux —
+sont dans `src/data/audio.js`. Aucun nombre magique dans le moteur. Le jeu reste
+jouable si WebAudio est indisponible : rien ne remonte au reste du code, et
+aucun son ne démarre avant un geste du joueur (politique d'autoplay).
