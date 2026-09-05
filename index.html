@@ -26,6 +26,19 @@
     </div>
   </div>
 
+  <!--
+    Table d'imports : elle permet au NAVIGATEUR de résoudre `import ... from
+    'three'` tout seul, sans outil de build. C'est ce qui rend le code source
+    directement jouable quand il est servi tel quel — par exemple par GitHub
+    Pages. La bibliothèque est versionnée dans le dépôt (vendor/) plutôt que
+    tirée d'un CDN : le jeu fonctionne ainsi hors ligne et ne dépend de
+    personne. Quand le jeu est construit avec Vite, cette table devient
+    simplement inutile : le bundle n'importe plus rien par nom de paquet.
+  -->
+  <script type="importmap">
+  { "imports": { "three": "./vendor/three.module.js" } }
+  </script>
+
   <script type="module" src="./src/main.js"></script>
 
   <script>

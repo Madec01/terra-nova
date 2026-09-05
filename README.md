@@ -23,6 +23,7 @@ npm test             # tests unitaires (node --test)
 npm run boot         # contrôle de démarrage rapide (40 s) — le jeu se lance-t-il ?
 npm run smoke        # scénario de jeu complet en navigateur headless
 npm run mobile       # audit de jouabilité tactile sur trois profils d'écran
+npm run pages        # le jeu est-il publiable ? (source brute ET build)
 npm run smoke:shot   # idem + captures d'écran dans /tmp/terranova-shots
 ```
 
@@ -44,6 +45,24 @@ Les systèmes **interagissent** : trop chauffer fait fondre les calottes, ce qui
 baisse l'albédo, ce qui réchauffe encore (rétroaction glace-albédo) ; la vapeur
 d'eau amplifie l'effet de serre ; une biosphère introduite trop vite s'effondre ;
 la pollution industrielle freine la végétation et ronge la stabilité climatique.
+
+## Publication
+
+Le jeu se publie de deux façons, et **les deux sont vérifiées** par
+`npm run pages` :
+
+- **Source brute.** GitHub Pages sert le dépôt tel quel. Cela fonctionne grâce
+  à la table d'imports d'`index.html`, qui permet au navigateur de résoudre
+  lui-même `import ... from 'three'`, et à `vendor/three.module.js` versionné
+  dans le dépôt — donc sans CDN et sans dépendance extérieure.
+- **Build de production.** Le workflow `.github/workflows/deploy.yml` construit
+  le jeu à chaque push, lance les tests, et publie `dist/`. Plus léger et plus
+  rapide à charger. Pour l'activer : *Settings → Pages → Source : GitHub
+  Actions*.
+
+Sans build, le navigateur charge une cinquantaine de modules séparés et une
+bibliothèque non minifiée : c'est plus lent, mais cela marche immédiatement,
+sans aucun réglage.
 
 ## Gagner
 
