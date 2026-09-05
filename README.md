@@ -8,10 +8,11 @@ caillou gelé et mort à un monde habitable — et qui change à vue d'œil au f
 ## Lancer le jeu
 
 ```bash
-cd terra-nova
 npm install
 npm run dev          # http://localhost:5173
 ```
+
+Aucun serveur, aucun backend : tout tourne dans le navigateur.
 
 Autres commandes :
 
