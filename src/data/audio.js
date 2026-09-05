@@ -131,14 +131,14 @@ export const SFX = {
    * portable ne restitue rien et le retour du placement disparaît.          */
   build: {
     base: 146,
-    gain: 0.62,
+    gain: 0.68,
     reverb: 0.30,
     jitter: { freq: 0.03, cutoff: 0.10, gain: 0.08 },
     voices: [
       { ratio: 1,    type: 'sine',     gain: 1.00, detune: 0,  start: 0,     attack: 0.008, hold: 0.050, release: 0.40, lp: 900, lpQ: 0.8,
-        sweep: { to: 0.68, time: 0.22, curve: 'exp' } },
+        sweep: { to: 0.78, time: 0.22, curve: 'exp' } },
       { ratio: 2,    type: 'sine',     gain: 0.42, detune: -6, start: 0.006, attack: 0.010, hold: 0.045, release: 0.34, lp: 1300, lpQ: 0.7,
-        sweep: { to: 0.74, time: 0.20, curve: 'exp' } },
+        sweep: { to: 0.82, time: 0.20, curve: 'exp' } },
       { ratio: 4.02, type: 'triangle', gain: 0.28, detune: 8,  start: 0.010, attack: 0.014, hold: 0.040, release: 0.30, lp: 2400, lpQ: 0.7 },
       { ratio: 6.01, type: 'sine',     gain: 0.09, detune: -4, start: 0.010, attack: 0.018, hold: 0.020, release: 0.24, lp: 2800, lpQ: 0.7 },
     ],

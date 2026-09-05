@@ -229,8 +229,10 @@ async function pointOnRegion(page, wanted) {
   return page.evaluate((want) => {
     const T = window.TERRA;
     const W = window.innerWidth, H = window.innerHeight;
-    for (let fy = 0.18; fy <= 0.72; fy += 0.06) {
-      for (let fx = 0.22; fx <= 0.78; fx += 0.06) {
+    // Balayage large et fin : sur téléphone, la bande de planète laissée
+    // libre par l'interface peut être étroite.
+    for (let fy = 0.08; fy <= 0.94; fy += 0.03) {
+      for (let fx = 0.06; fx <= 0.94; fx += 0.03) {
         const x = Math.round(W * fx), y = Math.round(H * fy);
         const e = document.elementFromPoint(x, y);
         if (!e || e.tagName !== 'CANVAS') continue;
@@ -244,6 +246,26 @@ async function pointOnRegion(page, wanted) {
     }
     return null;
   }, wanted);
+}
+
+/** Un point du canvas laissé libre par l'interface (pour le glisser). */
+async function freeCanvasPoint(page) {
+  return page.evaluate(() => {
+    const W = window.innerWidth, H = window.innerHeight;
+    let fallback = null;
+    for (let fy = 0.20; fy <= 0.90; fy += 0.03) {
+      for (let fx = 0.20; fx <= 0.80; fx += 0.05) {
+        const x = Math.round(W * fx), y = Math.round(H * fy);
+        const e = document.elementFromPoint(x, y);
+        if (!e || e.tagName !== 'CANVAS') continue;
+        if (!fallback) fallback = { x, y };
+        let id = null;
+        try { id = window.TERRA.scene.pick(x, y); } catch { /* ignore */ }
+        if (id != null) return { x, y };      // sur la planète : le glisser la fait tourner
+      }
+    }
+    return fallback;
+  });
 }
 
 /** Amène la région au centre (caméra), puis renvoie un point qui la touche. */
@@ -303,10 +325,13 @@ async function buildBlockedReason(page, type) {
 async function actOn(page, hand, s, notes) {
   if (s.spot === 'globe') {
     if (s.id === 'globe') {
+      const p = await freeCanvasPoint(page);
+      if (!p) { notes.push('aucun point du globe laissé libre par l’interface'); return 'échec de visée'; }
       const vp = page.viewportSize();
-      await hand.dragAt(Math.round(vp.width * 0.5), Math.round(vp.height * 0.45), 140, 40);
-      await page.waitForTimeout(200);
-      return 'glisser sur le globe';
+      const dx = p.x > vp.width / 2 ? -120 : 120;
+      await hand.dragAt(p.x, p.y, dx, 30);
+      await page.waitForTimeout(250);
+      return `glisser sur le globe (${p.x}, ${p.y})`;
     }
     if (s.placing) {
       const id = await findBuildable(page, s.placing);

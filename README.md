@@ -188,10 +188,33 @@ ou dents de scie, passe-bas systématique, léger désaccord entre les voix.
 **Cinq morceaux d'ambiance génératifs**, un par phase de progression : de
 *Poussière froide* (planète morte, presque immobile) à *Lanternes*
 (colonisation, habité). Chacun a sa fondamentale, sa gamme, ses timbres et sa
-densité. Un morceau n'est pas une boucle mais un bourdon continu, des nappes
-tenues qui se croisent et des textures éparses — il ne se répète jamais à
-l'identique et ne reste jamais figé. La musique suit l'état de la planète : la
-bande-son est une récompense au même titre que la transformation visuelle.
+densité. Un morceau n'est pas une boucle mais un bourdon continu, un souffle
+d'atmosphère, des nappes tenues qui se croisent et des textures éparses — il ne
+se répète jamais à l'identique et ne reste jamais figé. Les cinq fondamentales
+s'enchaînent par intervalles consonants : pendant un fondu enchaîné les deux
+bourdons se superposent, un demi-ton y sonnerait faux. La musique suit l'état de
+la planète : la bande-son est une récompense au même titre que la transformation
+visuelle.
+
+### Le son doit exister sur un téléphone
+
+Une nappe bâtie sur un bourdon grave est magnifique au casque et **silencieuse
+sur un mobile** : un haut-parleur de téléphone ne restitue quasiment rien sous
+400 Hz. Le piège est d'autant plus vicieux qu'on ne l'entend pas en développant.
+
+Deux conséquences dans la conception :
+
+- chaque morceau porte un **souffle** — du bruit filtré, très lent, très
+  discret. C'est l'atmosphère de la planète, mince et froide au début, ample à
+  la fin ; c'est aussi ce qui rend la musique audible sur mobile sans
+  l'éclaircir. Une texture large bande occupe la zone utile pour un coût de
+  niveau minuscule ;
+- les sons graves (`build`, `event`, `error`) portent un **transitoire médium**
+  filtré en bande, plutôt qu'un simple socle grave.
+
+`npm run audio` mesure cette **présence** — la part d'énergie entre 400 Hz et
+5 kHz — avec un plancher, en plus des plafonds d'aigu. La cible est une
+fenêtre, pas un maximum.
 
 Tout est programmé sur l'horloge de l'AudioContext, jamais avec `setTimeout` :
 c'est ce qui permet de rendre et de **mesurer** la couche audio hors ligne.
@@ -201,7 +224,8 @@ npm run audio     # rend chaque son et chaque morceau dans un OfflineAudioContex
 ```
 
 L'outil mesure crête, temps d'attaque, longueur de queue, part d'énergie
-au-dessus de 5 kHz, centroïde spectral et variation temporelle. Personne ne peut
+au-dessus de 5 kHz, présence entre 400 Hz et 5 kHz, centroïde spectral et
+variation temporelle. Personne ne peut
 tester « c'est agréable » ; en revanche, ce qui rendait l'ancien son
 désagréable est parfaitement mesurable. Les seuils sont dans
 [`docs/AUDIO.md`](docs/AUDIO.md).

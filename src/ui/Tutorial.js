@@ -266,7 +266,9 @@ export class Tutorial {
     try { this.snap = step.enter ? (step.enter(this._ctx()) || {}) : {}; }
     catch (err) { console.warn('[Tutorial] enter', step.id, err); }
 
+    this._forceCompact = false;
     this._compact = false;
+    this.node.classList.remove('is-compact');
     this._render(step);
     this._syncRoot(true);
     // Une étape déjà satisfaite à l'entrée ne doit pas rester affichée.
@@ -337,10 +339,15 @@ export class Tutorial {
       this._setTargetEl(null);
       this.node.classList.add('is-globe');
       this._hideRing();
+      // Viser la planète au doigt demande de la place : sur téléphone
+      // l'encart se réduit à son titre et à sa consigne, sans quoi il occupe
+      // le centre de l'écran — exactement là où la caméra amène le secteur.
+      this._setCompact(this.ui?.isPhone === true);
       return;
     }
     this.spot = null;
     this.node.classList.remove('is-globe');
+    this._setCompact(false);
 
     let found = null;
     if (Array.isArray(want)) {
@@ -403,11 +410,19 @@ export class Tutorial {
    * Sans retour en arrière dans l'étape : pas d'oscillation.
    */
   _avoid(targetRect) {
-    if (this._compact || this.folded) return;
+    if (this._forceCompact || this.folded) return;
     const own = this.node.getBoundingClientRect();
     if (!overlaps(own, targetRect)) return;
-    this._compact = true;
-    this.node.classList.add('is-compact');
+    this._forceCompact = true;   // sans retour en arrière dans l'étape
+    this._setCompact(true);
+  }
+
+  /** Forme réduite : le titre et la consigne, sans l'explication. */
+  _setCompact(v) {
+    const want = !!v || !!this._forceCompact;
+    if (this._compact === want) return;
+    this._compact = want;
+    this.node.classList.toggle('is-compact', want);
   }
 
   /**
