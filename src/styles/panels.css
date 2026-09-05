@@ -1626,11 +1626,16 @@ html.tn-touch .tn-guide-tools .tn-btn { min-height: var(--tn-tap); }
   box-shadow: inset 0 0 22px rgba(169, 139, 240, 0.12);
 }
 
+/* Sur ordinateur, la pastille se range dans le coin bas-gauche : c'est la
+   seule zone qu'aucun panneau n'occupe jamais (le rail s'arrête à 84 px, les
+   contrôles du temps sont centrés, les bulles sont à droite). Centrée en haut,
+   elle recouvrait l'encart du tutoriel. */
 .tn-sandbox-mark {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: calc(var(--tn-top-h) + 2px);
+  left: var(--tn-gap);
+  bottom: calc(var(--tn-gap) + var(--tn-bottom-h));
+  top: auto;
+  transform: none;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1662,6 +1667,7 @@ html.tn-phone-land .tn-ui.is-sandbox { --tn-top-h: calc(76px + var(--tn-safe-t))
 
 html.tn-phone .tn-sandbox-mark {
   left: 0; right: 0;
+  bottom: auto;
   transform: none;
   top: calc(var(--tn-top-h) - 18px);
   height: 18px;
