@@ -328,6 +328,21 @@ export class Tutorial {
     this._syncRoot();
   }
 
+  /**
+   * Replie l'encart quand une feuille occupe déjà le bas de l'écran.
+   *
+   * Mesuré sur iPhone 390×844 : entre l'encart en haut et la feuille de
+   * construction en bas, il ne restait qu'une bande de globe de 55 px — trop
+   * peu pour viser un secteur au doigt, et l'étape « construire » devenait
+   * infranchissable. Replié, l'encart ne garde que son titre et rend une
+   * centaine de pixels au globe. Il se rouvre dès que la feuille se referme.
+   */
+  _cederLaPlace() {
+    const gene = !!(this.ui?.isPhone && (this.ui.activePanel || this.ui.regionOpen));
+    if (gene && !this.folded) { this._replieAuto = true; this.setFolded(true); }
+    else if (!gene && this._replieAuto) { this._replieAuto = false; this.setFolded(false); }
+  }
+
   /** Hauteur insuffisante pour afficher l'encart complet sans masquer le globe. */
   _ecranCourt() {
     try { return (window.innerHeight || 0) < 520; } catch { return false; }
@@ -373,6 +388,9 @@ export class Tutorial {
 
   /** Résout la cible de l'étape et déplace le halo. */
   _syncTarget(step) {
+    // Appelé à chaque étape, cible globe ou non : c'est aussi ce qui REDÉPLIE
+    // l'encart quand la feuille se referme.
+    this._cederLaPlace();
     let want = null;
     try { want = typeof step.target === 'function' ? step.target(this._ctx()) : step.target; }
     catch (err) { console.warn('[Tutorial] target', step.id, err); }
