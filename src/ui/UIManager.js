@@ -456,12 +456,16 @@ export class UIManager {
     this.placingType = type;
     this.root.classList.add('is-placing');
     this.banner.hidden = false;
-    this.bannerText.textContent = this.isPhone
+    this.bannerText.textContent = (this.isPhone || this.isTouch)
       ? `Placer${NB}: ${BUILDINGS[type].name} — appuyez sur un secteur`
-      : `Placer${NB}: ${BUILDINGS[type].name} — Échap pour annuler`;
-    // Sur téléphone la feuille laisse la place à la planète : on choisit dans
-    // la feuille, on pose sur le globe.
-    if (this.isPhone) this.closePanel();
+      : `Placer${NB}: ${BUILDINGS[type].name} — clic gauche pour poser, Maj pour enchaîner, clic droit ou Échap pour annuler`;
+    // On choisit dans la feuille, on pose sur le globe : la feuille doit donc
+    // s'effacer sur TOUT écran tactile, pas seulement sur téléphone en
+    // portrait. En paysage (844×390), l'encart, une bulle et la feuille
+    // couvraient ensemble la totalité de l'écran : il ne restait aucun point
+    // où toucher la planète, et trois étapes du tutoriel étaient
+    // infranchissables autrement qu'en les passant.
+    if (this.isPhone || this.isTouch) this.closePanel();
     this.panels.build?.update?.(this.game.state);
     this.regionPanel.update(this.game.state);
     this._syncSheets();
@@ -488,12 +492,27 @@ export class UIManager {
     }
     this.game.build(type, regionId);
     this._flash(BUILDINGS[type].name + NB + '· secteur ' + regionId);
+    /* On sort du mode placement après chaque pose. Le mode persistant faisait
+       gagner un clic par bâtiment, mais il faisait surtout CONSTRUIRE SANS LE
+       VOULOIR au clic suivant. Maintenir Maj permet d'enchaîner volontairement. */
+    if (!this._shiftHeld) this.cancelPlacement();
     this.panels.build?.update?.(this.game.state);
   }
 
   /* =================================================================== */
   /*  MODE SCAN PERSISTANT                                               */
   /* =================================================================== */
+
+  /**
+   * Annule le mode en cours (placement ou scan). Retourne true si quelque
+   * chose a été annulé — le clic droit s'en sert pour décider s'il doit
+   * ensuite désélectionner le secteur.
+   */
+  cancelCurrentMode() {
+    if (this.placingType) { this.cancelPlacement(); return true; }
+    if (this.scanMode) { this.setScanMode(false); return true; }
+    return false;
+  }
 
   toggleScanMode() { this.setScanMode(!this.scanMode); }
 
@@ -506,7 +525,7 @@ export class UIManager {
     if (v) {
       this.banner.hidden = false;
       this.bannerText.textContent = 'Mode scan' + NB + ': appuyez sur les secteurs sombres à cartographier';
-      if (this.isPhone) this.closePanel();
+      if (this.isPhone || this.isTouch) this.closePanel();
     } else if (!this.placingType && this.banner) {
       this.banner.hidden = true;
     }
@@ -540,6 +559,13 @@ export class UIManager {
   /* =================================================================== */
 
   _bindKeys() {
+    /* Maj maintenue : permet d'enchaîner volontairement plusieurs
+       constructions du même type sans rouvrir le menu. */
+    this._shiftHeld = false;
+    this._offs.push(on(window, 'keydown', (e) => { if (e.key === 'Shift') this._shiftHeld = true; }));
+    this._offs.push(on(window, 'keyup', (e) => { if (e.key === 'Shift') this._shiftHeld = false; }));
+    this._offs.push(on(window, 'blur', () => { this._shiftHeld = false; }));
+
     this._offs.push(on(window, 'keydown', (e) => {
       const t = e.target;
       if (t instanceof HTMLElement && (t.isContentEditable

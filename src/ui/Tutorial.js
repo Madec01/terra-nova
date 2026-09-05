@@ -328,6 +328,49 @@ export class Tutorial {
     this._syncRoot();
   }
 
+  /** Hauteur insuffisante pour afficher l'encart complet sans masquer le globe. */
+  _ecranCourt() {
+    try { return (window.innerHeight || 0) < 520; } catch { return false; }
+  }
+
+  /**
+   * Quand une étape demande de POSER un bâtiment, amène devant le joueur un
+   * secteur où c'est réellement possible.
+   *
+   * Sans cela, le tutoriel disait « construisez » sans dire où : le secteur
+   * valide pouvait se trouver sur la face cachée, et il fallait tourner la
+   * planète à l'aveugle pour le trouver. Mesuré sur un contrôle automatisé :
+   * 140 gestes sur un écran Android et trois étapes abandonnées en paysage,
+   * contre 24 gestes sur un écran où la cible tombait par chance en vue.
+   */
+  _suggestPlacement() {
+    const type = this.ui?.placingType;
+    if (!type) { this._focusedFor = null; return; }
+    if (this._focusedFor === type) return;      // une seule fois par étape
+    this._focusedFor = type;
+
+    const game = this.game;
+    const R = game?.regions;
+    if (!R || !this.scene?.focusRegion) return;
+
+    // Meilleur candidat : constructible, et le plus « évident » possible.
+    let best = -1, bestScore = -Infinity;
+    for (let i = 0; i < R.count; i++) {
+      if (!R.discovered[i]) continue;
+      let ok = false;
+      try { ok = game.canBuild(type, i).ok; } catch { ok = false; }
+      if (!ok) continue;
+      // On privilégie les secteurs riches pour la ressource concernée, et on
+      // évite les pôles, moins lisibles à l'écran.
+      const score = (R.minerals?.[i] ?? 0) + (R.geothermal?.[i] ?? 0) + (R.ice?.[i] ?? 0)
+        - Math.abs(R.latitude?.[i] ?? 0) * 0.5;
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    if (best >= 0) {
+      try { this.scene.focusRegion(best); } catch { /* le tutoriel ne doit jamais casser le jeu */ }
+    }
+  }
+
   /** Résout la cible de l'étape et déplace le halo. */
   _syncTarget(step) {
     let want = null;
@@ -339,10 +382,15 @@ export class Tutorial {
       this._setTargetEl(null);
       this.node.classList.add('is-globe');
       this._hideRing();
-      // Viser la planète au doigt demande de la place : sur téléphone
-      // l'encart se réduit à son titre et à sa consigne, sans quoi il occupe
-      // le centre de l'écran — exactement là où la caméra amène le secteur.
-      this._setCompact(this.ui?.isPhone === true);
+      /* Viser la planète demande de la place : l'encart se réduit alors à son
+         titre et à sa consigne, sans quoi il occupe le centre de l'écran —
+         exactement là où se trouve le globe.
+         Le critère n'est pas « téléphone » mais « écran court » : en paysage
+         (844×390) l'encart couvrait à lui seul les deux tiers de la hauteur,
+         et trois étapes de construction étaient infranchissables autrement
+         qu'en les passant. */
+      this._setCompact(this.ui?.isPhone === true || this._ecranCourt());
+      this._suggestPlacement();
       return;
     }
     this.spot = null;

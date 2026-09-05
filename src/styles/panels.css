@@ -1285,3 +1285,66 @@ html.tn-phone .tn-phone-only { display: inline-flex; }
 /* Fiche de secteur repliée : seul l'essentiel reste (partout, pas seulement
    sur téléphone — le chevron de l'en-tête doit agir à la souris aussi). */
 .tn-region.is-peek .tn-region-details { display: none; }
+
+/* ==========================================================================
+   Réglages audio du menu
+   ========================================================================== */
+
+.tn-audio { display: flex; flex-direction: column; gap: 8px; }
+
+.tn-slider-row {
+  display: grid;
+  grid-template-columns: 5.5em 1fr 3em;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;            /* cible tactile : le jeu se joue au doigt */
+}
+
+.tn-slider-label {
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--tn-muted, #7b8da3);
+}
+
+.tn-slider-val {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--tn-text, #c9d6e4);
+  text-align: right;
+}
+
+.tn-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 44px;                /* zone de saisie confortable au doigt… */
+  background: transparent;     /* …alors que la piste reste fine */
+  cursor: pointer;
+}
+.tn-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--tn-line-strong, #2b3d52);
+}
+.tn-slider::-moz-range-track {
+  height: 2px;
+  background: var(--tn-line-strong, #2b3d52);
+}
+.tn-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px; height: 14px;
+  margin-top: -6px;
+  background: var(--tn-accent, #5fd3e8);
+  border: 0;
+  border-radius: 0;            /* angles droits : direction artistique */
+  transform: rotate(45deg);
+}
+.tn-slider::-moz-range-thumb {
+  width: 14px; height: 14px;
+  background: var(--tn-accent, #5fd3e8);
+  border: 0; border-radius: 0;
+}
+.tn-slider:focus-visible { outline: 1px solid var(--tn-accent, #5fd3e8); outline-offset: 2px; }
+
+.tn-btn.is-active { border-color: var(--tn-warn, #e0a34a); color: var(--tn-warn, #e0a34a); }

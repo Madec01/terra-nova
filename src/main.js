@@ -114,6 +114,14 @@ function boot() {
   };
   scene.onRegionHover = (regionId) => scene.setHovered(regionId);
 
+  // Clic droit : il ne construit RIEN. Il annule le mode en cours, sinon il
+  // désélectionne. Auparavant les deux boutons construisaient, ce qui posait
+  // des bâtiments par accident.
+  scene.onSecondaryClick = () => {
+    if (ui.cancelCurrentMode && ui.cancelCurrentMode()) return;
+    game.selectRegion(null);
+  };
+
   /* ------------------------------------------------------------------ */
   /*  Boucle principale                                                  */
   /* ------------------------------------------------------------------ */

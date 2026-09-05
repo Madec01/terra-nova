@@ -89,6 +89,8 @@ export class SceneManager {
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.onClick = (x, y) => this._handleClick(x, y);
+    // Clic droit : jamais de construction, seulement une annulation.
+    this.controls.onSecondaryClick = () => { if (this.onSecondaryClick) this.onSecondaryClick(); };
     this.controls.onHover = (x, y) => this._handleHover(x, y);
 
     /* --- uniforms globaux partagés par tous les shaders ---------------- */
@@ -165,6 +167,7 @@ export class SceneManager {
     /* --- callbacks publics --------------------------------------------- */
     this.onRegionClick = null;
     this.onRegionHover = null;
+    this.onSecondaryClick = null;
 
     this._contextLost = false;
     this._disposed = false;
@@ -608,6 +611,7 @@ export class SceneManager {
     this.regions = null;
     this.onRegionClick = null;
     this.onRegionHover = null;
+    this.onSecondaryClick = null;
   }
 }
 

@@ -64,12 +64,18 @@ export class MainMenu {
       this.ui?.restartTutorial?.();
     }));
 
+    /* --- Audio ---------------------------------------------------------
+       Le moteur sait régler ses volumes depuis le début, mais rien ne
+       l'appelait : un joueur gêné par la musique n'avait aucun recours
+       hors de la console. */
+    this.audioWrap = this._buildAudio();
+
     this.node = el('div', { class: 'tn-overlay tn-menu', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Menu principal' },
       el('div', { class: 'tn-menu-panel' },
         el('div', { class: 'tn-menu-brand' },
           el('h1', { class: 'tn-menu-title', text: 'TERRA NOVA' }),
           el('div', { class: 'tn-menu-sub', text: 'Programme de terraformation · Direction des mondes nouveaux' })),
-        el('p', { class: 'tn-menu-lore', text: 'Une planète morte tourne sous votre sonde de commandement. Cartographiez sa surface, épaississez son atmosphère, réchauffez sa croûte, faites couler l’eau, puis semez la vie. La mission est réussie lorsque sept indicateurs planétaires se maintiennent ensemble pendant 180 jours.' }),
+        el('p', { class: 'tn-menu-lore', text: 'Une planète morte tourne sous votre sonde de commandement. Cartographiez sa surface, épaississez son atmosphère, réchauffez sa croûte, faites couler l’eau, puis semez la vie. La mission est réussie lorsque huit indicateurs planétaires se maintiennent ensemble pendant 180 jours.' }),
 
         this.resumeBtn,
         this.tutorialBtn,
@@ -83,12 +89,100 @@ export class MainMenu {
           this.typeWrap),
         this.newBtn,
 
+        el('div', { class: 'tn-section-title', text: 'Audio' }),
+        this.audioWrap,
+
         el('div', { class: 'tn-section-title', text: 'Emplacements de sauvegarde' }),
         this.slots,
         el('p', { class: 'tn-hint', text: 'L’emplacement 1 reçoit également la sauvegarde automatique (une fois par année de mission).' })));
 
     this.node.hidden = true;
     return this.node;
+  }
+
+  /* ------------------------------------------------------------------ */
+
+  /** Réglages sonores : trois curseurs, une coupure, et le morceau en cours. */
+  _buildAudio() {
+    const audio = () => this.game?.audio;
+    const CLE = 'terranova.audio';
+
+    const lu = (() => {
+      try { return JSON.parse(localStorage.getItem(CLE) || '{}'); } catch { return {}; }
+    })();
+    const garder = (o) => { try { localStorage.setItem(CLE, JSON.stringify(o)); } catch { /* ignoré */ } };
+    const etat = {
+      master: lu.master ?? 0.6, music: lu.music ?? 0.35, sfx: lu.sfx ?? 0.7,
+      enabled: lu.enabled !== false,
+    };
+
+    const appliquer = () => {
+      const a = audio();
+      if (!a) return;
+      try {
+        a.setEnabled?.(etat.enabled);
+        a.setVolume?.(etat.master);
+        a.setMusicVolume?.(etat.music);
+        a.setSfxVolume?.(etat.sfx);
+      } catch { /* le son ne doit jamais casser le jeu */ }
+      garder(etat);
+    };
+    // Le moteur n'existe qu'après le premier geste du joueur : on réapplique
+    // à chaque ouverture du menu, et une fois maintenant si possible.
+    this._applyAudio = appliquer;
+    appliquer();
+
+    const curseur = (cle, libelle) => {
+      const val = el('span', { class: 'tn-slider-val', text: Math.round(etat[cle] * 100) + ' %' });
+      const input = el('input', {
+        class: 'tn-slider', type: 'range', min: '0', max: '100', step: '5',
+        value: String(Math.round(etat[cle] * 100)), 'aria-label': libelle,
+      });
+      this._offs.push(on(input, 'input', () => {
+        etat[cle] = Number(input.value) / 100;
+        val.textContent = input.value + ' %';
+        appliquer();
+      }));
+      return el('div', { class: 'tn-slider-row' },
+        el('span', { class: 'tn-slider-label', text: libelle }), input, val);
+    };
+
+    const coupure = el('button', { class: 'tn-btn tn-btn--wide', type: 'button' });
+    const rafraichirCoupure = () => {
+      coupure.textContent = etat.enabled ? 'Couper le son' : 'Rétablir le son';
+      coupure.classList.toggle('is-active', !etat.enabled);
+    };
+    this._offs.push(on(coupure, 'click', () => {
+      etat.enabled = !etat.enabled; rafraichirCoupure(); appliquer();
+    }));
+    rafraichirCoupure();
+
+    this.trackLabel = el('small', { text: '—' });
+    const suivant = el('button', { class: 'tn-btn tn-btn--wide', type: 'button' },
+      el('span', { text: 'Morceau suivant' }), this.trackLabel);
+    this._offs.push(on(suivant, 'click', () => {
+      try { audio()?.nextTrack?.(); } catch { /* ignoré */ }
+      this._refreshTrack();
+    }));
+
+    return el('div', { class: 'tn-audio' },
+      curseur('master', 'Général'),
+      curseur('music', 'Musique'),
+      curseur('sfx', 'Effets'),
+      coupure, suivant);
+  }
+
+  /** Nom lisible du morceau en cours, s'il est connu. */
+  _refreshTrack() {
+    if (!this.trackLabel) return;
+    let texte = '—';
+    try {
+      const a = this.game?.audio;
+      const id = a?.currentTrack;
+      const piste = (a?.tracks?.() || []).find((t) => (t.id ?? t) === id);
+      if (id) texte = piste?.name || String(id).replace(/_/g, ' ');
+    } catch { /* ignoré */ }
+    this.trackLabel.textContent = texte;
   }
 
   /* ------------------------------------------------------------------ */
@@ -103,6 +197,10 @@ export class MainMenu {
     // Sans partie en cours, il n'y a rien à accompagner : on cache l'entrée.
     this.tutorialBtn.hidden = !this.game.state;
     this.newBtn.textContent = mode === 'system' ? 'Redémarrer une partie' : 'Nouvelle partie';
+    // Le moteur audio n'existe qu'après le premier geste du joueur : on
+    // réapplique les réglages mémorisés à chaque ouverture.
+    this._applyAudio?.();
+    this._refreshTrack();
     requestAnimationFrame(() => this.node.classList.add('is-in'));
   }
 

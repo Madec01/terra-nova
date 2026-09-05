@@ -59,12 +59,13 @@ export class OrbitControls {
 
     /** Callbacks : (clientX, clientY) => void */
     this.onClick = null;
+    this.onSecondaryClick = null;   // clic droit : ne construit jamais
     this.onHover = null;
 
     /* --- état du geste ------------------------------------------------- */
     this._pointers = new Map();      // pointerId -> {x, y}
     this._dragging = false;
-    this._downX = 0; this._downY = 0; this._downTime = 0;
+    this._downX = 0; this._downY = 0; this._downTime = 0; this._downButton = 0;
     this._moved = 0;
     this._pinchDist = 0;
     this._primaryId = null;
@@ -116,6 +117,7 @@ export class OrbitControls {
       this._dragging = true;
       this._downX = e.clientX; this._downY = e.clientY;
       this._downTime = performance.now();
+      this._downButton = e.button ?? 0;
       this._moved = 0;
       this.vTheta = 0; this.vPhi = 0;
       try { this.dom.setPointerCapture(e.pointerId); } catch (_) { /* ignoré */ }
@@ -181,7 +183,12 @@ export class OrbitControls {
       // CLIC : peu de déplacement ET geste court. Vrai aussi au toucher.
       if (dist < CLICK_MAX_DISTANCE && dt < CLICK_MAX_DURATION) {
         this.vTheta = 0; this.vPhi = 0;
-        if (this.onClick) this.onClick(e.clientX, e.clientY);
+        /* Le bouton compte : à la souris, le clic DROIT ne doit jamais
+           déclencher une construction — on posait des bâtiments sans le
+           vouloir. Il sert désormais à annuler. Au toucher, `button` vaut 0,
+           donc rien ne change. */
+        if (this._downButton === 2) { if (this.onSecondaryClick) this.onSecondaryClick(e.clientX, e.clientY); }
+        else if (this.onClick) this.onClick(e.clientX, e.clientY);
       }
     }
     this.idleTime = 0;
