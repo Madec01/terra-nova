@@ -1,0 +1,30 @@
+import { spawn } from 'node:child_process';
+import { chromium } from 'playwright';
+import { existsSync } from 'node:fs';
+const PORT = 6400 + Math.floor(Math.random()*90);
+const run=(c,a)=>new Promise((r,j)=>{const p=spawn(c,a,{stdio:['ignore','pipe','pipe']});let o='';p.stdout.on('data',d=>o+=d);p.stderr.on('data',d=>o+=d);p.on('exit',x=>x===0?r(o):j(new Error(o)))});
+await run('npx',['vite','build','--logLevel','error']);
+const srv=await new Promise((res,rej)=>{const p=spawn('npx',['vite','preview','--port',String(PORT),'--strictPort'],{stdio:['ignore','pipe','pipe'],detached:true});
+ process.on('exit',()=>{try{process.kill(-p.pid,'SIGTERM')}catch{}});let o='';const t=setTimeout(()=>rej(new Error(o)),25000);
+ p.stdout.on('data',d=>{o+=d;if(/Local:.*http/.test(o)){clearTimeout(t);res(p)}});p.stderr.on('data',d=>o+=d)});
+const br=await chromium.launch({executablePath:existsSync('/opt/pw-browsers/chromium')?'/opt/pw-browsers/chromium':undefined,args:['--use-gl=swiftshader','--enable-unsafe-swiftshader','--no-sandbox','--disable-dev-shm-usage']});
+const pg=await br.newPage({viewport:{width:1440,height:900}});
+const err=[];pg.on('pageerror',e=>err.push(e.message));pg.on('console',m=>{if(m.type()==='error'&&!/audio\/|favicon/.test(m.text()))err.push(m.text())});
+await pg.goto(`http://localhost:${PORT}/`,{waitUntil:'load',timeout:30000});
+await pg.waitForFunction(()=>!!window.TERRA,{timeout:20000});
+await pg.evaluate(()=>window.TERRA.game.newGame({seed:2026}));
+await pg.waitForTimeout(1200);
+const r = await pg.evaluate(()=>{
+  const b=[...document.querySelectorAll('#ui button')].find(x=>/guide/i.test(x.textContent||x.getAttribute('aria-label')||x.dataset.tool||''));
+  if(!b) return {err:'aucun bouton Guide trouvé'};
+  b.click();
+  return new Promise(res=>setTimeout(()=>{
+    const panneau=document.querySelector('.tn-guide, [class*="guide"]');
+    const txt=(panneau?.textContent||'').trim();
+    res({ouvert:!!panneau && txt.length>200, taille:txt.length, extrait:txt.slice(0,180)});
+  },700));
+});
+await pg.screenshot({path:'/tmp/guide-apercu.png'});
+console.log(JSON.stringify(r,null,1));
+console.log(err.length?('ERREURS: '+err.slice(0,4).join(' | ')):'aucune erreur console');
+await br.close();

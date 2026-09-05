@@ -49,8 +49,20 @@ export class MainMenu {
 
     this.newBtn = el('button', { class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button', text: 'Nouvelle partie' });
     this.resumeBtn = el('button', { class: 'tn-btn tn-btn--wide', type: 'button', text: 'Reprendre la mission' });
-    this._offs.push(on(this.newBtn, 'click', () => this._newGame()));
+    this._offs.push(on(this.newBtn, 'click', () => this._newGame(false)));
     this._offs.push(on(this.resumeBtn, 'click', () => this.close()));
+
+    /* --- Bac à sable ----------------------------------------------------
+       Un MODE DE JEU, pas un outil de mise au point (celui-là est derrière
+       F2). On l'annonce pour ce qu'il est : un terrain d'essai où l'on peut
+       tout tenter, et dont aucune réussite ne compte comme une victoire. */
+    this.sandboxBtn = el('button', {
+      class: 'tn-btn tn-btn--wide tn-btn--sandbox', type: 'button',
+      dataset: { action: 'sandbox' },
+    },
+      el('span', { text: 'Bac à sable' }),
+      el('small', { text: 'ressources illimitées, tout débloqué, planète cartographiée' }));
+    this._offs.push(on(this.sandboxBtn, 'click', () => this._newGame(true)));
 
     // Le tutoriel ne se montre qu'à la première partie : sans cette entrée,
     // un joueur qui l'a fermé n'aurait aucun moyen de le retrouver.
@@ -88,6 +100,10 @@ export class MainMenu {
           el('span', { class: 'tn-field-label', text: 'Type de planète' }),
           this.typeWrap),
         this.newBtn,
+        this.sandboxBtn,
+        el('p', { class: 'tn-hint', text: 'Le bac à sable sert à comprendre : essayer une stratégie, '
+          + 'voir l’effet d’un bâtiment, provoquer une rétroaction. Il est signalé pendant toute la '
+          + 'partie et une réussite n’y est pas comptée comme une victoire.' }),
 
         el('div', { class: 'tn-section-title', text: 'Audio' }),
         this.audioWrap,
@@ -197,6 +213,9 @@ export class MainMenu {
     // Sans partie en cours, il n'y a rien à accompagner : on cache l'entrée.
     this.tutorialBtn.hidden = !this.game.state;
     this.newBtn.textContent = mode === 'system' ? 'Redémarrer une partie' : 'Nouvelle partie';
+    // Le libellé dit ce qui va se passer : on QUITTE la partie en cours.
+    this.sandboxBtn.firstChild.textContent = mode === 'system'
+      ? 'Redémarrer en bac à sable' : 'Bac à sable';
     // Le moteur audio n'existe qu'après le premier geste du joueur : on
     // réapplique les réglages mémorisés à chaque ouverture.
     this._applyAudio?.();
@@ -275,14 +294,14 @@ export class MainMenu {
     }
   }
 
-  _newGame() {
+  _newGame(sandbox = false) {
     const raw = (this.seedInput.value || '').trim();
     let seed;
     if (/^\d+$/.test(raw)) seed = Number(raw) >>> 0;
     else if (raw) seed = hashString(raw);
     else seed = randomSeed();
     try {
-      this.game.newGame({ seed, planetType: this.planetType });
+      this.game.newGame({ seed, planetType: this.planetType, sandbox: !!sandbox });
       this.close();
     } catch (err) {
       console.error('[MainMenu] newGame', err);

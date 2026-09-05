@@ -167,11 +167,21 @@ export class PlanetStatusPanel {
       const value = el('span', { class: 'tn-row-value' });
       const mark = el('span', { class: 'tn-row-mark', 'aria-hidden': 'true' });
       const b = bar(0, 1);
-      const node = el('div', { class: 'tn-row tn-row--victory' },
-        mark, el('span', { class: 'tn-row-label', text: row.label || row.key }), b, value);
+      /* L'objectif était réservé à l'infobulle : au doigt, il n'existait pas.
+         Il est désormais ÉCRIT sous le libellé, donc lisible partout — et
+         généré depuis `row.target`, qui vient de BALANCE.victory. */
+      const target = el('span', { class: 'tn-row-target', text: targetText(row) });
+      // Le libellé rappelle parfois l'objectif entre parenthèses : il ferait
+      // doublon avec la ligne ci-dessous, qui le dit mieux.
+      const label = (row.label || row.key).replace(/\s*\([^)]*\)\s*$/, '');
+      const node = el('div', { class: 'tn-row tn-row--victory', dataset: { key: row.key } },
+        mark,
+        el('span', { class: 'tn-row-main' },
+          el('span', { class: 'tn-row-label', text: label }), target),
+        b, value);
       this.tooltip?.attach(node, () => `Objectif${NB}: ${targetText(row)}`);
       this.list.appendChild(node);
-      this.rows.set(row.key, { node, value, bar: b, mark });
+      this.rows.set(row.key, { node, value, bar: b, mark, target });
     }
   }
 
@@ -243,7 +253,13 @@ export function targetText(row) {
   const t = row.target;
   if (t == null) return '—';
   const unit = (val) => formatValue({ value: val, format: row.format });
-  if (typeof t === 'number') return '≥' + NB + unit(t);
+  // Une ligne peut porter une fourchette (température) ou une borne haute
+  // (dérive thermique) : `report()` les signale par `max` et `atMost`.
+  if (typeof t === 'number') {
+    if (row.atMost) return '≤' + NB + unit(t);
+    if (row.max != null) return unit(t) + ' – ' + unit(row.max);
+    return '≥' + NB + unit(t);
+  }
   if (typeof t === 'object') {
     if (t.min != null && t.max != null) return `${unit(t.min)} – ${unit(t.max)}`;
     if (t.min != null) return '≥' + NB + unit(t.min);

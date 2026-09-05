@@ -1008,12 +1008,15 @@
 /* --- Barre d'onglets du bas ------------------------------------------ */
 .tn-tabbar { display: none; }
 
+/* Six onglets depuis l'ajout du guide : les colonnes suivent le nombre réel
+   d'onglets, et le libellé se resserre pour rester entier à 360 px. */
 html.tn-phone .tn-tabbar {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   height: var(--tn-tabbar-h);
   border-top: 1px solid var(--tn-line);
 }
+html.tn-phone .tn-tab-label { font-size: 8px; letter-spacing: 0.01em; }
 
 .tn-tab {
   display: flex;
@@ -1348,3 +1351,353 @@ html.tn-phone .tn-phone-only { display: inline-flex; }
 .tn-slider:focus-visible { outline: 1px solid var(--tn-accent, #5fd3e8); outline-offset: 2px; }
 
 .tn-btn.is-active { border-color: var(--tn-warn, #e0a34a); color: var(--tn-warn, #e0a34a); }
+
+/* ===================================================================== */
+/*  GUIDE — manuel de bord consultable à tout moment                     */
+/* ===================================================================== */
+/*  Contraintes : lisible à la souris ET au doigt. Sections repliables,
+ *  cibles de 44 px sur écran tactile, défilement VERTICAL uniquement —
+ *  rien ne doit jamais déborder en largeur (voir tools/guide-check.mjs).  */
+
+.tn-guide { display: flex; flex-direction: column; gap: 8px; }
+
+/* --- Sommaire : des pastilles qui ouvrent et amènent la section ------- */
+.tn-guide-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--tn-line);
+}
+
+.tn-guide-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--tn-line-2);
+  color: var(--tn-dim);
+  font-family: var(--tn-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-align: left;
+  transition: color var(--tn-fast) ease, border-color var(--tn-fast) ease, background var(--tn-fast) ease;
+}
+.tn-guide-chip:hover { color: var(--tn-text); border-color: var(--tn-accent-line); background: var(--tn-accent-soft); }
+.tn-guide-chip-icon { color: var(--tn-accent-2); }
+
+.tn-guide-tools { display: flex; gap: 4px; }
+.tn-guide-tools .tn-btn { flex: 1 1 0; margin: 0; }
+
+/* --- Sections repliables ---------------------------------------------- */
+.tn-guide-sections { display: flex; flex-direction: column; gap: 6px; }
+
+.tn-guide-section {
+  border: 1px solid var(--tn-line);
+  background: rgba(10, 15, 22, 0.5);
+}
+.tn-guide-section.is-open { border-color: var(--tn-line-2); }
+
+.tn-guide-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 9px;
+  text-align: left;
+  color: var(--tn-text);
+  border-bottom: 1px solid transparent;
+}
+.tn-guide-section.is-open .tn-guide-head { border-bottom-color: var(--tn-line); }
+.tn-guide-head:hover { background: rgba(255, 255, 255, 0.04); }
+
+.tn-guide-icon { flex: 0 0 auto; font-size: 15px; color: var(--tn-accent); line-height: 1; }
+.tn-guide-titles { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tn-guide-title {
+  font-family: var(--tn-mono);
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.tn-guide-lead { font-size: 10px; color: var(--tn-dim); line-height: 1.4; }
+.tn-guide-arrow { flex: 0 0 auto; color: var(--tn-dim); font-size: 11px; }
+
+.tn-guide-body { padding: 8px 9px 10px; display: flex; flex-direction: column; gap: 8px; }
+
+/* --- Corps de texte ---------------------------------------------------- */
+.tn-guide-p { font-size: 11px; line-height: 1.6; color: var(--tn-text); }
+.tn-guide-note {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--tn-dim);
+  border-left: 2px solid var(--tn-accent-line);
+  padding: 5px 8px;
+  background: rgba(95, 211, 232, 0.05);
+}
+
+/* --- Étapes numérotées ------------------------------------------------- */
+.tn-guide-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.tn-guide-step { display: flex; gap: 8px; }
+.tn-guide-step-num {
+  flex: 0 0 auto;
+  font-family: var(--tn-mono);
+  font-size: 11px;
+  color: var(--tn-accent);
+  padding-top: 1px;
+}
+.tn-guide-step-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tn-guide-step-title {
+  font-family: var(--tn-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--tn-text);
+}
+.tn-guide-why, .tn-guide-how { font-size: 11px; line-height: 1.55; color: var(--tn-dim); }
+.tn-guide-how { color: var(--tn-text); }
+.tn-guide-why b, .tn-guide-how b {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tn-accent-2);
+  font-weight: 600;
+}
+
+/* --- Définitions -------------------------------------------------------- */
+.tn-guide-defs { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.tn-guide-def { border-left: 2px solid var(--tn-line-2); padding-left: 8px; }
+.tn-guide-term {
+  font-family: var(--tn-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--tn-accent-2);
+  margin-bottom: 2px;
+}
+.tn-guide-desc { margin: 0; font-size: 11px; line-height: 1.55; color: var(--tn-text); }
+
+/* --- Commandes ---------------------------------------------------------- */
+.tn-guide-keys { display: flex; flex-direction: column; gap: 4px; }
+.tn-guide-keys-title {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tn-dim);
+  padding-top: 6px;
+}
+.tn-guide-key {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  background: rgba(255, 255, 255, 0.025);
+  border-left: 2px solid var(--tn-line-2);
+}
+.tn-guide-key-action { font-size: 11px; color: var(--tn-text); }
+.tn-guide-key-how { font-family: var(--tn-mono); font-size: 10px; color: var(--tn-dim); }
+.tn-guide-key-how em { font-style: normal; color: var(--tn-line-2); }
+
+/* --- Conditions de victoire --------------------------------------------- */
+.tn-guide-victory { display: flex; flex-direction: column; gap: 8px; }
+
+.tn-guide-vc {
+  border: 1px solid var(--tn-line);
+  border-left: 2px solid var(--tn-accent-line);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tn-guide-vc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.tn-guide-vc-label { font-size: 11px; color: var(--tn-text); }
+.tn-guide-vc-target {
+  font-family: var(--tn-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--tn-accent);
+  white-space: nowrap;
+}
+.tn-guide-vc-now-line { display: flex; align-items: baseline; gap: 6px; }
+.tn-guide-vc-now-label {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tn-dim);
+}
+.tn-guide-vc-now { font-family: var(--tn-mono); font-variant-numeric: tabular-nums; font-size: 11px; }
+.tn-guide-vc-line { font-size: 10px; line-height: 1.55; color: var(--tn-dim); }
+.tn-guide-vc-line b {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.tn-guide-vc-line.is-up b { color: var(--tn-ok); }
+.tn-guide-vc-line.is-down b { color: var(--tn-warn); }
+
+/* --- Tableaux générés (bâtiments, technologies) ------------------------- */
+.tn-guide-table { display: flex; flex-direction: column; gap: 6px; }
+
+.tn-guide-group {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tn-dim);
+  padding: 8px 0 2px;
+  border-bottom: 1px solid var(--tn-line);
+}
+
+.tn-guide-item {
+  border: 1px solid var(--tn-line);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.tn-guide-item-head { display: flex; align-items: center; gap: 7px; }
+.tn-guide-item-icon { font-size: 14px; color: var(--tn-accent-2); line-height: 1; }
+/* Le nom garde la priorité sur la pastille de palier : il ne doit jamais être
+   coupé au milieu d'un mot. */
+.tn-guide-item-name { flex: 1 1 auto; min-width: 0; font-size: 12px; overflow-wrap: normal; }
+.tn-guide-item-tier {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--tn-dim);
+  border: 1px solid var(--tn-line-2);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.tn-guide-item-desc { font-size: 10px; line-height: 1.5; color: var(--tn-dim); }
+
+.tn-guide-chips { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.tn-guide-chips-label {
+  font-family: var(--tn-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tn-line-2);
+  flex: 0 0 auto;
+}
+.tn-guide-pill {
+  font-family: var(--tn-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--tn-text);
+  border: 1px solid var(--tn-line);
+  padding: 1px 5px;
+  /* Les longs libellés se coupent proprement plutôt que d'élargir le panneau. */
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.tn-guide-pill.is-up { color: var(--tn-ok); border-color: rgba(95, 211, 154, 0.3); }
+.tn-guide-pill.is-down { color: var(--tn-warn); border-color: rgba(224, 163, 74, 0.3); }
+
+.tn-guide-limits { font-family: var(--tn-mono); font-size: 9px; color: var(--tn-line-2); }
+
+/* Aucun mot ne doit pouvoir élargir la colonne : les panneaux sont étroits. */
+.tn-guide, .tn-guide * { overflow-wrap: break-word; word-break: normal; }
+
+/* Au doigt, chaque commande du guide fait au moins 44 px. */
+html.tn-touch .tn-guide-chip { min-height: var(--tn-tap); padding: 6px 11px; }
+html.tn-touch .tn-guide-head { min-height: var(--tn-tap); }
+html.tn-touch .tn-guide-tools .tn-btn { min-height: var(--tn-tap); }
+
+/* ===================================================================== */
+/*  BAC À SABLE — marque permanente                                      */
+/* ===================================================================== */
+/*  Le mode ne doit jamais pouvoir passer pour une vraie partie : un liseré
+ *  encadre l'écran et une pastille reste affichée en continu.             */
+
+.tn-ui.is-sandbox::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 58;
+  border: 2px solid rgba(169, 139, 240, 0.55);
+  box-shadow: inset 0 0 22px rgba(169, 139, 240, 0.12);
+}
+
+.tn-sandbox-mark {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(var(--tn-top-h) + 2px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  z-index: 47;
+  pointer-events: none;
+  background: rgba(24, 18, 40, 0.92);
+  border: 1px solid rgba(169, 139, 240, 0.55);
+  color: #cbb4ff;
+  font-family: var(--tn-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+  max-width: calc(100vw - 2 * var(--tn-gap));
+  overflow: hidden;
+}
+.tn-sandbox-mark small { color: var(--tn-dim); letter-spacing: 0.04em; }
+.tn-sandbox-dot {
+  width: 6px; height: 6px;
+  background: #a98bf0;
+  animation: tn-pulse 2.4s ease-in-out infinite;
+}
+/* Sur téléphone, la pastille ne doit RIEN recouvrir : la barre du haut se
+   rallonge d'une bande, et la marque s'y installe. Redéfinir `--tn-top-h` sur
+   `.tn-ui` suffit — tout ce qui s'y ancre (feuilles, bandeau, bulles, encart
+   du tutoriel) descend d'autant, sans qu'aucune autre règle change. */
+html.tn-phone .tn-ui.is-sandbox { --tn-top-h: calc(120px + var(--tn-safe-t)); }
+html.tn-phone-land .tn-ui.is-sandbox { --tn-top-h: calc(76px + var(--tn-safe-t)); }
+
+html.tn-phone .tn-sandbox-mark {
+  left: 0; right: 0;
+  transform: none;
+  top: calc(var(--tn-top-h) - 18px);
+  height: 18px;
+  justify-content: center;
+  gap: 6px;
+  border-left: 0; border-right: 0;
+  max-width: none;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  padding: 0 6px;
+}
+html.tn-phone .tn-sandbox-mark small { display: none; }
+html.tn-phone .tn-sandbox-dot { width: 5px; height: 5px; }
+
+/* Écran de fin : en bac à sable, ce n'est pas une victoire. */
+.tn-victory-screen.is-sandbox .tn-menu-title { color: #a98bf0; text-shadow: 0 0 24px rgba(169, 139, 240, 0.3); }
+.tn-victory-screen.is-sandbox .tn-menu-sub { color: #cbb4ff; }
+
+/* Entrée « Bac à sable » du menu principal. */
+.tn-btn--sandbox { border-color: rgba(169, 139, 240, 0.45); color: #cbb4ff; }
+.tn-btn--sandbox:hover:not(:disabled) { border-color: #a98bf0; background: rgba(169, 139, 240, 0.12); }
+html.tn-phone .tn-menu .tn-menu-panel > .tn-btn--sandbox { order: 0; }
+
+/* ===================================================================== */
+/*  Objectif de victoire, écrit sous le libellé (et non en infobulle)     */
+/* ===================================================================== */
+
+.tn-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tn-victory .tn-row-main .tn-row-label { flex: 0 0 auto; }
+.tn-row-target {
+  font-family: var(--tn-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  color: var(--tn-line-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tn-row--victory.is-ok .tn-row-target { color: var(--tn-dim); }

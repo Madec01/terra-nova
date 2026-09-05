@@ -73,14 +73,20 @@ export class Game {
   /*  CYCLE DE VIE                                                       */
   /* =================================================================== */
 
-  newGame({ seed = randomSeed(), planetType = 'rocky' } = {}) {
+  newGame({ seed = randomSeed(), planetType = 'rocky', sandbox = false } = {}) {
     this.state = createInitialState({ seed, planetType });
+    /* Le mode fait partie de l'ÉTAT, pas de l'interface : il est donc
+       sérialisé avec le reste et survit à une sauvegarde/chargement. */
+    this.state.sandbox = !!sandbox;
     this.regions = generatePlanet({
       seed, subdivisions: BALANCE.planet.subdivisions, planetType,
     });
     this.rng = new Random(seed ^ 0x5eed);
     this.ctx.rng = this.rng;
     this.selectedRegion = null;
+    // Avant `_refreshTechEffects` : le bac à sable offre tout l'arbre, et les
+    // effets passifs doivent en tenir compte dès le premier tick.
+    if (this.state.sandbox) this._openSandbox();
     this._refreshTechEffects();
     this._bindContext();
 
@@ -93,7 +99,9 @@ export class Game {
     this.time.setSpeed(1);
     this.state.time.speed = 1;
     this.markAllDirty();
-    pushLog(this.state, 'Sonde de commandement en orbite. Début de la mission.', 'info', '◉');
+    pushLog(this.state, this.state.sandbox
+      ? 'Simulateur de terraformation — bac à sable. Aucune conséquence, aucune mission.'
+      : 'Sonde de commandement en orbite. Début de la mission.', 'info', '◉');
     this.bus.emit('game:new', { state: this.state });
     return this.state;
   }
@@ -113,6 +121,8 @@ export class Game {
     this.rng = new Random(this.state.seed ^ 0x5eed);
     this.ctx.rng = this.rng;
     this.selectedRegion = null;
+    // `state.sandbox` vient de la sauvegarde : on rétablit ses invariants.
+    if (this.state.sandbox) this._openSandbox();
     this._refreshTechEffects();
     this._bindContext();
     for (const s of this.systems) s.reset?.(this.ctx);
@@ -182,6 +192,8 @@ export class Game {
       try { s.tick(ctx); }
       catch (err) { console.error(`[${s.constructor.name}]`, err); }
     }
+    // Après ResourceSystem, qui vient d'écrire `state.capacity`.
+    if (this.state && this.state.sandbox) this._sandboxRefill();
   }
 
   _resetAccumulator() {
@@ -199,6 +211,15 @@ export class Game {
     for (const k in a.capacity) a.capacity[k] = 0;
     a.dampening = 0;
     a.contributions.energy.length = 0;
+    /* En bac à sable les réservoirs sont démesurés : sans cela, ResourceSystem
+       écrêterait le réapprovisionnement à la capacité de base (BALANCE.storage)
+       et une mégastructure resterait impayable. */
+    if (this.state && this.state.sandbox) {
+      const q = this._sandboxStock();
+      a.capacity.energy = q;
+      a.capacity.materials = q;
+      a.capacity.water = q;
+    }
     return a;
   }
 
@@ -472,6 +493,69 @@ export class Game {
   /** Phase courante, recalculée à la demande. */
   currentPhase() {
     return BALANCE.phases.find((p) => p.id === this.state.progress.phase) || BALANCE.phases[0];
+  }
+
+  /* =================================================================== */
+  /*  MODE BAC À SABLE                                                   */
+  /* =================================================================== */
+  /*  Un MODE DE JEU offert au joueur, à ne pas confondre avec le panneau
+   *  développeur (touche F2), qui reste un outil technique.
+   *
+   *  Ce que le bac à sable retire : la rareté (réservoirs maintenus pleins),
+   *  l'arbre technologique (tout est acquis) et la reconnaissance (planète
+   *  entièrement cartographiée). Ce qu'il NE retire PAS : le climat, la
+   *  biosphère, les colonies, les rétroactions et les conditions de victoire.
+   *  Ce qu'on y observe est donc vrai en partie normale.                    */
+
+  /** Le mode est-il actif ? Lu depuis l'état, donc valable après chargement. */
+  get sandbox() { return !!(this.state && this.state.sandbox); }
+
+  /**
+   * Volume de réserve du bac à sable. Ce n'est pas une valeur d'équilibrage :
+   * c'est « assez grand pour ne jamais gêner », dérivé du bâtiment le plus
+   * cher du catalogue pour rester juste si les coûts changent.
+   */
+  _sandboxStock() {
+    if (this._sbStock == null) {
+      let max = 0;
+      for (const def of BUILDING_LIST) {
+        for (const k in (def.cost || {})) max = Math.max(max, def.cost[k] || 0);
+      }
+      this._sbStock = Math.max(1000, Math.round(max * 200));
+    }
+    return this._sbStock;
+  }
+
+  /** Ouverture d'une partie en bac à sable : tout est acquis, tout est visible. */
+  _openSandbox() {
+    const s = this.state;
+    if (!s) return;
+    for (const id in TECHNOLOGIES) if (!s.tech.unlocked.includes(id)) s.tech.unlocked.push(id);
+    s.tech.current = null;
+    s.tech.progress = 0;
+    if (this.regions) {
+      for (let i = 0; i < this.regions.count; i++) this.regions.discovered[i] = 1;
+      this.markAllDirty();
+    }
+    this._sandboxRefill();
+  }
+
+  /**
+   * Remet les réservoirs à plein. Appelée à la fin de chaque tick : le joueur
+   * ne manque jamais de rien, mais le FLUX affiché reste celui de sa vraie
+   * installation — c'est justement ce qu'on vient observer ici.
+   */
+  _sandboxRefill() {
+    const s = this.state;
+    if (!s) return;
+    const q = this._sandboxStock();
+    const cap = s.capacity || {};
+    const res = s.resources;
+    res.energy = Math.max(res.energy, cap.energy > 0 ? cap.energy : q);
+    res.materials = Math.max(res.materials, cap.materials > 0 ? cap.materials : q);
+    res.water = Math.max(res.water, cap.water > 0 ? cap.water : q);
+    res.science = Math.max(res.science, q);
+    res.biomass = Math.max(res.biomass, q);
   }
 
   /* =================================================================== */

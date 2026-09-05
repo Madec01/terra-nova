@@ -28,6 +28,7 @@ import { TimeBar } from './TimeBar.js';
 import { DebugPanel } from './DebugPanel.js';
 import { MainMenu } from './MainMenu.js';
 import { Tutorial } from './Tutorial.js';
+import { Guide } from './Guide.js';
 
 const NB = '\u00A0';
 
@@ -36,6 +37,7 @@ const TOOLS = [
   { id: 'layers', icon: '◈', label: 'Couches', key: 'L' },
   { id: 'research', icon: '⌬', label: 'Recherche', key: 'R' },
   { id: 'planet', icon: '◉', label: 'Planète', key: '' },
+  { id: 'guide', icon: '✦', label: 'Guide', key: 'G' },
   { id: 'log', icon: '≡', label: 'Journal', key: '' },
   { id: 'saves', icon: '▣', label: 'Sauvegardes', key: 'Échap' },
 ];
@@ -49,6 +51,7 @@ const TABS = [
   { id: 'layers', icon: '◈', label: 'Couches' },
   { id: 'research', icon: '⌬', label: 'Recherche' },
   { id: 'planet', icon: '◉', label: 'Planète' },
+  { id: 'guide', icon: '✦', label: 'Guide' },
   { id: 'log', icon: '≡', label: 'Menu' },
 ];
 
@@ -107,6 +110,7 @@ export class UIManager {
     this.panels.layers = new LayersPanel(ctx);
     this.panels.research = new ResearchPanel(ctx);
     this.panels.planet = new PlanetStatusPanel(ctx);
+    this.panels.guide = new Guide(ctx);
     this.panels.log = new LogPanel(ctx);
 
     // --- structure ----------------------------------------------------
@@ -116,6 +120,7 @@ export class UIManager {
     this.root.appendChild(this.regionPanel.mount());
     this.root.appendChild(this._buildBottom());
     this.root.appendChild(this._buildBanner());
+    this.root.appendChild(this._buildSandboxMark());
     this.notifications.mount();
     this.root.appendChild(this.tutorial.mount());
     this.root.appendChild(this.debugPanel.mount());
@@ -222,6 +227,32 @@ export class UIManager {
     this.flash.hidden = true;
 
     return el('div', { class: 'tn-center-stack' }, this.banner, this.flash);
+  }
+
+  /**
+   * Marque du BAC À SABLE : une pastille et un liseré, visibles en permanence.
+   *
+   * Le mode ne doit jamais pouvoir être confondu avec une vraie partie — d'où
+   * un repère qui n'est ni une notification (elles disparaissent) ni un
+   * panneau (ils se referment), mais une marque permanente de l'écran.
+   * Le liseré lui-même est un pseudo-élément de `.tn-ui.is-sandbox`.
+   */
+  _buildSandboxMark() {
+    this.sandboxMark = el('div', { class: 'tn-sandbox-mark', role: 'status' },
+      el('span', { class: 'tn-sandbox-dot', 'aria-hidden': 'true' }),
+      el('span', { text: 'BAC À SABLE' }),
+      el('small', { text: 'ressources illimitées · aucune conséquence' }));
+    this.sandboxMark.hidden = true;
+    return this.sandboxMark;
+  }
+
+  /** Applique la marque de mode. Aucune création de DOM. */
+  _syncSandbox(state) {
+    const on_ = !!(state && state.sandbox);
+    if (this._sandboxOn === on_) return;
+    this._sandboxOn = on_;
+    this.root.classList.toggle('is-sandbox', on_);
+    if (this.sandboxMark) this.sandboxMark.hidden = !on_;
   }
 
   /* =================================================================== */
@@ -578,7 +609,8 @@ export class UIManager {
       // Le menu principal capte tout sauf Échap.
       if (this.mainMenu.visible && e.key !== 'Escape') return;
       // Sans partie en cours, seuls Échap et F2 ont un sens.
-      if (!this.game.state && e.key !== 'Escape' && e.key !== 'F2') return;
+      // Le guide, lui, reste consultable même sans partie en cours.
+      if (!this.game.state && !['Escape', 'F2', 'F1', 'g', 'G'].includes(e.key)) return;
 
       switch (e.key) {
         case ' ': case 'Spacebar':
@@ -593,6 +625,8 @@ export class UIManager {
         case 'b': case 'B': this.togglePanel('build'); break;
         case 'l': case 'L': this.togglePanel('layers'); break;
         case 'r': case 'R': this.togglePanel('research'); break;
+        case 'g': case 'G': this.togglePanel('guide'); break;
+        case 'F1': e.preventDefault(); this.togglePanel('guide'); break;
         case 's': case 'S': this.toggleScanMode(); break;
         case 'c': case 'C': {
           // Le cycle des couches quitte Tab, rendu à la navigation clavier (I8).
@@ -706,6 +740,7 @@ export class UIManager {
     const s = state || this.game?.state;
     if (!this._mounted) return;
     this.root.classList.toggle('is-empty', !s);
+    this._syncSandbox(s);
     if (!s) return;
 
     this.topBar.update(s);
@@ -726,17 +761,37 @@ export class UIManager {
     this._victoryShown = true;
     if (!this._victoryNode) {
       this._victoryBody = el('div', { class: 'tn-victory-body' });
+      this._victoryTitle = el('h1', { class: 'tn-menu-title' });
+      this._victorySub = el('div', { class: 'tn-menu-sub' });
+      this._victoryLore = el('p', { class: 'tn-menu-lore' });
       const cont = el('button', { class: 'tn-btn tn-btn--primary tn-btn--wide', type: 'button', text: 'Continuer à jouer' });
       this._offs.push(on(cont, 'click', () => this._hideVictory()));
-      this._victoryNode = el('div', { class: 'tn-overlay tn-victory-screen', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Mission accomplie' },
+      this._victoryNode = el('div', { class: 'tn-overlay tn-victory-screen', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Fin de mission' },
         el('div', { class: 'tn-menu-panel' },
-          el('div', { class: 'tn-menu-brand' },
-            el('h1', { class: 'tn-menu-title', text: 'MISSION ACCOMPLIE' }),
-            el('div', { class: 'tn-menu-sub', text: 'La planète est devenue viable' })),
-          el('p', { class: 'tn-menu-lore', text: 'Les sept indicateurs se sont maintenus dans les tolérances de mission. Un monde neuf respire désormais sans assistance. Vous pouvez poursuivre la partie librement.' }),
+          el('div', { class: 'tn-menu-brand' }, this._victoryTitle, this._victorySub),
+          this._victoryLore,
           this._victoryBody, cont));
       this.root.appendChild(this._victoryNode);
     }
+
+    /* Une réussite en bac à sable N'EST PAS une victoire : ressources
+       illimitées, arbre technologique offert et planète déjà cartographiée
+       retirent à l'exercice ce qui en faisait une épreuve. On le dit. */
+    const sandbox = !!state.sandbox;
+    let conditions = 0;
+    try { conditions = (this.game.victoryReport() || []).length; } catch { conditions = 0; }
+    const many = conditions ? `Les ${conditions} indicateurs se sont maintenus` : 'Les indicateurs se sont maintenus';
+    this._victoryNode.classList.toggle('is-sandbox', sandbox);
+    this._victoryTitle.textContent = sandbox ? 'ESSAI CONCLUANT' : 'MISSION ACCOMPLIE';
+    this._victorySub.textContent = sandbox
+      ? 'Bac à sable — ceci n’est pas une victoire'
+      : 'La planète est devenue viable';
+    this._victoryLore.textContent = sandbox
+      ? `${many} dans les tolérances de mission — mais en bac à sable, `
+        + 'avec des ressources illimitées, toutes les technologies acquises et la planète déjà cartographiée. '
+        + 'La stratégie fonctionne : reste à la reproduire en partie normale.'
+      : `${many} dans les tolérances de mission. Un monde neuf respire désormais sans assistance. `
+        + 'Vous pouvez poursuivre la partie librement.';
 
     const day = state.time?.day ?? 0;
     const rows = [
